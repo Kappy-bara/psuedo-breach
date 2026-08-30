@@ -196,6 +196,27 @@ export async function wipeEventProgress(formData: FormData) {
   revalidatePath("/dashboard");
 }
 
+export async function wipeUserProgress(formData: FormData) {
+  const admin = await requireAdmin();
+  const userId = String(formData.get("userId"));
+  if (!userId) return;
+
+  const w = { userId };
+  await prisma.submission.deleteMany({ where: w });
+  await prisma.solve.deleteMany({ where: w });
+  await prisma.inventoryEntry.deleteMany({ where: w });
+  await prisma.hintUnlock.deleteMany({ where: w });
+  await prisma.tradeExecution.deleteMany({ where: w });
+  await prisma.achievementUnlock.deleteMany({ where: w });
+  
+  // also delete their feed events (actorId matches user)
+  await prisma.feedEvent.deleteMany({ where: { actorId: userId } });
+
+  await logAdmin(admin.id, "wipe-user-progress", userId);
+  revalidatePath("/admin/users");
+  revalidatePath("/dashboard");
+}
+
 export async function grantItemToUser(formData: FormData) {
   const admin = await requireAdmin();
   const userId = String(formData.get("userId"));
