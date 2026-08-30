@@ -1,0 +1,227 @@
+// PSEUDO-BREACH — data model
+//
+// Local dev uses SQLite (zero setup). Production on Vercel uses Postgres (Neon).
+// To switch to Postgres: change `provider` below to "postgresql" and set DATABASE_URL
+// to your Neon pooled connection string. The schema is written to be portable:
+// no enums, no scalar lists, no native Json — JSON payloads are stored as String
+// and parsed in app code (see src/lib/json.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Event {
+  id        String   @id @default(cuid())
+  slug      String   @unique // "demo-session" | "pseudo-breach-main"
+  name      String
+  startsAt  DateTime
+  endsAt    DateTime
+  status    String   @default("draft") // draft | live | ended
+  isDemo    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  users         User[]
+  modules       Module[]
+  announcements Announcement[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  registerId   String   @unique
+  passwordHash String
+  displayName  String
+  branch       String   @default("")
+  year         String   @default("")
+  role         String   @default("participant") // participant | admin
+  isLocked     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  submissions Submission[]
+  solves      Solve[]
+  hintUnlocks HintUnlock[]
+  tokenGrants TokenGrant[]
+  playerKV    PlayerKV[]
+  auditLogs   AuditLog[]   @relation("AuditActor")
+
+  @@index([eventId, registerId])
+}
+
+model Module {
+  id                    String   @id @default(cuid())
+  slug                  String
+  title                 String
+  blurb                 String   @default("")
+  order                 Int      @default(0)
+  theme                 String   @default("default")
+  unlockAt              DateTime? // null = follows event start
+  isHidden              Boolean  @default(false)
+  // JSON string: array of token keys the player must hold to open this module. "[]" = none.
+  prerequisiteTokenKeys String   @default("[]")
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  puzzles Puzzle[]
+  hints   Hint[]
+
+  @@unique([eventId, slug])
+  @@index([eventId, order])
+}
+
+model Puzzle {
+  id          String  @id @default(cuid())
+  slug        String  @unique
+  title       String
+  promptMd    String
+  // static | regex | numeric | cminus-output
+  type        String  @default("static")
+  basePoints  Int     @default(100)
+  difficulty  String  @default("easy") // easy | medium | hard | boss
+  order       Int     @default(0)
+  // JSON string. Shape depends on type — see src/lib/validators.ts
+  //   static:  { "answer": "..."} or { "perUser": true }  (perUser => HMAC flag)
+  //   regex:   { "pattern": "^FLAG\\{.*\\}$", "flags": "i" }
+  //   numeric: { "value": 42, "tolerance": 0 }
+  //   cminus-output: { "expectedStdout": "..." }
+  validatorConfig String @default("{}")
+  perUserFlag     Boolean @default(false)
+  cooldownSec     Int     @default(15)
+  isHidden        Boolean @default(false)
+  // solving this puzzle grants this token key to the player (cross-module unlocks)
+  grantsTokenKey  String?
+
+  moduleId String
+  module   Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  submissions Submission[]
+  solves      Solve[]
+  hints       Hint[]
+  tokenGrants TokenGrant[]
+
+  @@index([moduleId, order])
+}
+
+model Hint {
+  id        String  @id @default(cuid())
+  contentMd String
+  order     Int     @default(0)
+  cost      Int     @default(0) // points deducted on unlock; 0 = free
+  // JSON string, one of:
+  //   { "kind": "free" }
+  //   { "kind": "auto-after-wrong", "n": 3 }
+  //   { "kind": "token", "key": "ghost-key" }
+  //   { "kind": "terminal" }            (granted via c- knock())
+  //   { "kind": "paid" }                (must spend `cost`)
+  unlockRule     String  @default("{\"kind\":\"free\"}")
+  grantsTokenKey String? // unlocking this hint grants this token to the player
+
+  moduleId String
+  module   Module  @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  puzzleId String?
+  puzzle   Puzzle? @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+
+  unlocks HintUnlock[]
+
+  @@index([moduleId, order])
+}
+
+model HintUnlock {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hintId     String
+  hint       Hint     @relation(fields: [hintId], references: [id], onDelete: Cascade)
+  costPaid   Int      @default(0)
+  unlockedAt DateTime @default(now())
+
+  @@unique([userId, hintId])
+}
+
+model Submission {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  puzzleId  String
+  puzzle    Puzzle   @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+  value     String
+  isCorrect Boolean
+  ip        String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([userId, puzzleId, createdAt])
+  @@index([puzzleId, createdAt])
+}
+
+model Solve {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  puzzleId       String
+  puzzle         Puzzle   @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+  basePts        Int
+  bonusPts       Int
+  solveIndex     Int // 0 = first blood
+  timeToSolveSec Int
+  solvedAt       DateTime @default(now())
+
+  @@unique([userId, puzzleId])
+  @@index([puzzleId, solveIndex])
+}
+
+model TokenGrant {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key           String
+  sourcePuzzleId String?
+  sourcePuzzle   Puzzle? @relation(fields: [sourcePuzzleId], references: [id], onDelete: SetNull)
+  grantedAt     DateTime @default(now())
+
+  @@unique([userId, key])
+  @@index([userId])
+}
+
+model PlayerKV {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key    String
+  value  String
+
+  @@unique([userId, key])
+}
+
+model Announcement {
+  id        String   @id @default(cuid())
+  bodyMd    String
+  createdAt DateTime @default(now())
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  targetType String   @default("")
+  targetId   String   @default("")
+  meta       String   @default("{}") // JSON string
+  createdAt  DateTime @default(now())
+
+  actorId String?
+  actor   User?   @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([action, createdAt])
+}
