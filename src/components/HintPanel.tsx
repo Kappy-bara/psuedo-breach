@@ -42,7 +42,7 @@ export function HintPanel({ hints }: { hints: HintView[] }) {
 
   return (
     <div className="panel p-5">
-      <div className="text-xs tracking-widest text-ink-dim">// INTEL</div>
+      <div className="kicker">{"// intel"}</div>
       <ul className="mt-3 space-y-2">
         {hints.map((h, i) => {
           const shown = open[h.id] ?? h.contentMd;
@@ -63,7 +63,7 @@ export function HintPanel({ hints }: { hints: HintView[] }) {
                     <button
                       onClick={() => act(h)}
                       disabled={busy === h.id}
-                      className="border border-accent-amber/50 px-2 py-0.5 text-xs text-accent-amber transition-colors hover:bg-accent-amber hover:text-bg"
+                      className="border border-signal/50 px-2 py-0.5 text-xs text-signal transition-colors hover:bg-signal hover:text-bg"
                     >
                       buy · {h.buyCost} 💰
                     </button>
@@ -74,7 +74,7 @@ export function HintPanel({ hints }: { hints: HintView[] }) {
               {!shown && !h.unlocked && h.buyCost === null && (
                 <div className="mt-1 text-xs text-ink-dim">{h.lockedHint}</div>
               )}
-              {err[h.id] && <div className="mt-1 text-xs text-accent-red">{err[h.id]}</div>}
+              {err[h.id] && <div className="mt-1 text-xs text-danger">{err[h.id]}</div>}
               {shown && (
                 <div className="mt-2 border-t border-border pt-2">
                   <Markdown>{shown}</Markdown>

@@ -64,13 +64,13 @@ export function TradeList({
   return (
     <div className="space-y-3">
       {banner && (
-        <p className="flash-in border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-accent">
+        <p className="flash-in border border-verified/40 bg-verified/10 px-3 py-2 text-sm text-verified">
           {banner}
         </p>
       )}
       {trades.length === 0 ? (
         <p className="panel p-4 text-sm text-ink-dim">
-          SUDO has nothing for you right now. Come back with more loot.
+          The shop has nothing for you right now. Come back with more loot.
         </p>
       ) : (
         <ul className="space-y-3">
@@ -85,9 +85,9 @@ export function TradeList({
                   <Markdown className="mt-1 text-sm text-ink-dim">{t.descriptionMd}</Markdown>
                 )}
                 <div className="mt-2 text-sm">
-                  <span className="text-accent-red">give</span> {describe(t.give, catalog)}
+                  <span className="text-danger">give</span> {describe(t.give, catalog)}
                   <span className="mx-2 text-ink-dim">→</span>
-                  <span className="text-accent">get</span> {describe(t.get, catalog)}
+                  <span className="text-verified">get</span> {describe(t.get, catalog)}
                 </div>
               </div>
               <button
@@ -105,7 +105,7 @@ export function TradeList({
               </button>
             </div>
             {n && !n.ok && (
-              <p className="mt-2 text-sm text-accent-red">{n.text}</p>
+              <p className="mt-2 text-sm text-danger">{n.text}</p>
             )}
           </li>
         );

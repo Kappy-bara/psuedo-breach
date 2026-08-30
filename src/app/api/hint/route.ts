@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { parseJson } from "@/lib/json";
 import { type HintUnlockRule } from "@/lib/game";
 import { getInventoryMap, spendItems, InventoryError, CRED } from "@/lib/inventory";
+import { checkAchievements } from "@/lib/achievements";
 
 const Body = z.object({ hintId: z.string().min(1).max(60) });
 
@@ -29,7 +30,7 @@ export const POST = withUser(async (user, req) => {
   const rule = parseJson<HintUnlockRule>(hint.unlockRule, { kind: "free" });
 
   if (rule.kind === "npc")
-    return json({ error: "SUDO has this one. Go trade." }, 403);
+    return json({ error: "The shop has this one — go trade." }, 403);
 
   if (rule.kind === "item") {
     const inv = await getInventoryMap(user.id);
@@ -61,6 +62,7 @@ export const POST = withUser(async (user, req) => {
         return json({ error: `That costs ${rule.cost} 💰 and you're short.` }, 403);
       throw e;
     }
+    void checkAchievements(user.id, user.eventId).catch(() => {});
     return json({ unlocked: true, contentMd: hint.contentMd, costPaid });
   }
 

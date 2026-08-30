@@ -2,11 +2,11 @@ import Link from "next/link";
 import type { ModuleCardView } from "@/lib/game";
 
 const themeAccent: Record<string, string> = {
-  green: "text-accent",
-  cyan: "text-accent-cyan",
-  amber: "text-accent-amber",
+  green: "text-verified",
+  cyan: "text-accent",
+  amber: "text-signal",
   magenta: "text-accent-magenta",
-  red: "text-accent-red",
+  red: "text-danger",
   default: "text-ink",
 };
 
@@ -18,23 +18,34 @@ export function ModuleCard({ m }: { m: ModuleCardView }) {
   const inner = (
     <div
       className={`panel panel-hover relative flex h-full flex-col p-4 ${
-        m.locked ? "opacity-60 grayscale-[0.4]" : ""
-      } ${done ? "border-accent/45 bg-accent/[0.05]" : ""}`}
+        m.locked ? "opacity-55 grayscale-[0.5]" : ""
+      } ${done ? "border-verified/45 bg-verified/[0.05]" : ""}`}
     >
       <div className="flex items-start justify-between gap-2">
-        <span className={`text-xs font-bold tracking-[0.12em] ${accent}`}>{m.title}</span>
-        <span className="shrink-0 text-xs text-ink-dim">
-          {m.locked ? "🔒" : done ? "✓" : `${m.solvedCount}/${m.puzzleCount}`}
+        <span className={`font-display text-xs font-bold tracking-[0.1em] ${accent}`}>
+          {m.title}
+        </span>
+        <span className="shrink-0 font-mono text-xs text-ink-dim">
+          {m.cleared
+            ? "✓"
+            : m.locked
+              ? m.unlockKind === "time"
+                ? "⏰"
+                : m.unlockKind === "item"
+                  ? "🔑"
+                  : "🔒"
+              : `${m.solvedCount}/${m.puzzleCount}`}
+          {m.yourMedal &&
+            " " + (m.yourMedal === "gold" ? "🥇" : m.yourMedal === "silver" ? "🥈" : "🥉")}
         </span>
       </div>
 
       <p className="mt-2 line-clamp-3 flex-1 text-sm text-ink-dim">{m.blurb}</p>
 
-      {/* progress rail */}
       {!m.locked && m.puzzleCount > 0 && (
         <div className="mt-3 h-0.5 w-full bg-border">
           <div
-            className={`h-full ${done ? "bg-accent" : "bg-ink-faint"}`}
+            className={`h-full ${done ? "bg-verified" : "bg-ink-faint"}`}
             style={{ width: `${pct}%` }}
           />
         </div>
@@ -42,7 +53,7 @@ export function ModuleCard({ m }: { m: ModuleCardView }) {
 
       <div className="mt-2 flex items-center justify-between text-xs">
         {m.locked ? (
-          <span className="text-accent-amber">{m.lockedReason}</span>
+          <span className="text-signal">{m.lockedReason}</span>
         ) : (
           <span className="text-ink-dim">
             <span className="text-ink">{m.pointsEarned}</span> / {m.pointsAvailable} pts

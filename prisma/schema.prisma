@@ -32,6 +32,8 @@ model Event {
   announcements Announcement[]
   items         Item[]
   npcs          Npc[]
+  feed          FeedEvent[]
+  achievements  Achievement[]
 }
 
 model User {
@@ -43,33 +45,41 @@ model User {
   year         String   @default("")
   role         String   @default("participant") // participant | admin
   isLocked     Boolean  @default(false)
+  chosenTitle  String   @default("") // "" = auto-pick the highest-priority unlocked achievement
   createdAt    DateTime @default(now())
 
   eventId String
   event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
-  submissions Submission[]
-  solves      Solve[]
-  hintUnlocks HintUnlock[]
-  inventory   InventoryEntry[]
-  auditLogs   AuditLog[]       @relation("AuditActor")
+  submissions  Submission[]
+  solves       Solve[]
+  hintUnlocks  HintUnlock[]
+  inventory    InventoryEntry[]
+  achievements AchievementUnlock[]
+  auditLogs    AuditLog[]         @relation("AuditActor")
 
   @@index([eventId, registerId])
 }
 
 model Module {
-  id       String    @id @default(cuid())
+  id       String  @id @default(cuid())
   slug     String
   title    String
-  blurb    String    @default("")
-  order    Int       @default(0)
-  theme    String    @default("default")
-  unlockAt DateTime? // null = follows event start
-  isHidden Boolean   @default(false)
-  // JSON string: { itemKey: qty } the player must HOLD to enter. "{}" = open.
-  prerequisiteItemsJson String @default("{}")
+  blurb    String  @default("")
+  order    Int     @default(0)
+  theme    String  @default("default")
+  isHidden Boolean @default(false)
+
+  // ── open-world map ──
+  mapX        Int    @default(0)
+  mapY        Int    @default(0)
+  mapZone     String @default("")
+  mapEdgesJson String @default("[]") // adjacent room slugs, for drawing corridors
+  // the unlock rule — see src/lib/unlock.ts. Default: { "open": true }
+  unlockRuleJson String @default("{\"open\":true}")
+
   // JSON string: { itemKey: qty } granted when every puzzle in the room is solved.
-  clearRewardJson       String @default("{}")
+  clearRewardJson String @default("{}")
 
   eventId String
   event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
@@ -251,6 +261,52 @@ model TradeExecution {
   createdAt DateTime @default(now())
 
   @@index([userId, tradeId])
+}
+
+// ── live feed + achievements ─────────────────────────────────────────────────
+
+model FeedEvent {
+  id        String   @id @default(cuid())
+  kind      String // solve | first-blood | room-clear | forge | achievement | milestone
+  actorId   String?
+  actorName String   @default("")
+  title     String // rendered line: "Kappy cracked THE MAILROOM"
+  meta      String   @default("{}") // JSON string
+  createdAt DateTime @default(now())
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, createdAt])
+}
+
+model Achievement {
+  id            String  @id @default(cuid())
+  key           String
+  name          String
+  descriptionMd String  @default("")
+  icon          String  @default("🎖️")
+  title         String  @default("") // the display title it grants, e.g. "the Unhinted"
+  credReward    Int     @default(0)
+  priority      Int     @default(0) // higher wins when auto-picking a title
+  hidden        Boolean @default(false)
+  ruleJson      String // see src/lib/achievements.ts
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, key])
+}
+
+model AchievementUnlock {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementKey String
+  unlockedAt     DateTime @default(now())
+
+  @@unique([userId, achievementKey])
+  @@index([userId])
 }
 
 // ── misc ─────────────────────────────────────────────────────────────────────

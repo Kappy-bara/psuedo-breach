@@ -48,3 +48,6 @@ accounts*.csv
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# claude code (local preview config, scratch)
+.claude/

@@ -1,12 +1,13 @@
 /**
  * Seed — idempotent-ish. Rebuilds the two events (demo + main): item catalogue,
- * SUDO + trades, dungeon rooms with first-year puzzles + loot, hints, test users.
+ * the Shop + trades, dungeon rooms with first-year puzzles + loot, hints, test users.
  *
  *   npm run db:seed          # apply / update
  *   npm run db:reset         # wipe file + re-push + re-seed
  */
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import type { UnlockRule } from "../src/lib/unlock";
 
 const prisma = new PrismaClient();
 
@@ -58,11 +59,31 @@ type ModuleSeed = {
   title: string;
   theme?: string;
   blurb: string;
-  prereq?: Record<string, number>;
+  map: { x: number; y: number; zone?: string };
+  edges?: string[]; // adjacent room slugs — corridors on the map
+  unlock?: UnlockRule; // default { open: true }
+  prereq?: Record<string, number>; // shorthand → { items: {...} }
   clearReward?: Record<string, number>;
   puzzles: PuzzleSeed[];
   hints?: HintSeed[];
 };
+type AchievementSeed = {
+  key: string;
+  name: string;
+  icon: string;
+  descriptionMd?: string;
+  title?: string;
+  credReward?: number;
+  priority?: number;
+  hidden?: boolean;
+  rule: unknown;
+};
+
+function compileUnlock(m: ModuleSeed): UnlockRule {
+  if (m.unlock) return m.unlock;
+  if (m.prereq && Object.keys(m.prereq).length) return { items: m.prereq };
+  return { open: true };
+}
 type TradeSeed = {
   label: string;
   descriptionMd?: string;
@@ -82,6 +103,7 @@ type EventSeed = {
   items: ItemSeed[];
   npc: { slug: string; name: string; icon: string; blurbMd: string; trades: TradeSeed[] };
   modules: ModuleSeed[];
+  achievements?: AchievementSeed[];
 };
 
 async function seedEvent(ev: EventSeed) {
@@ -126,26 +148,22 @@ async function seedEvent(ev: EventSeed) {
 
   for (let mi = 0; mi < ev.modules.length; mi++) {
     const m = ev.modules[mi]!;
+    const modFields = {
+      title: m.title,
+      blurb: m.blurb,
+      order: mi,
+      theme: m.theme ?? "default",
+      mapX: m.map.x,
+      mapY: m.map.y,
+      mapZone: m.map.zone ?? "",
+      mapEdgesJson: JSON.stringify(m.edges ?? []),
+      unlockRuleJson: JSON.stringify(compileUnlock(m)),
+      clearRewardJson: JSON.stringify(m.clearReward ?? {}),
+    };
     const mod = await prisma.module.upsert({
       where: { eventId_slug: { eventId: event.id, slug: m.slug } },
-      update: {
-        title: m.title,
-        blurb: m.blurb,
-        order: mi,
-        theme: m.theme ?? "default",
-        prerequisiteItemsJson: JSON.stringify(m.prereq ?? {}),
-        clearRewardJson: JSON.stringify(m.clearReward ?? {}),
-      },
-      create: {
-        eventId: event.id,
-        slug: m.slug,
-        title: m.title,
-        blurb: m.blurb,
-        order: mi,
-        theme: m.theme ?? "default",
-        prerequisiteItemsJson: JSON.stringify(m.prereq ?? {}),
-        clearRewardJson: JSON.stringify(m.clearReward ?? {}),
-      },
+      update: modFields,
+      create: { eventId: event.id, slug: m.slug, ...modFields },
     });
 
     for (let pi = 0; pi < m.puzzles.length; pi++) {
@@ -231,6 +249,24 @@ async function seedEvent(ev: EventSeed) {
     });
   }
 
+  for (const a of ev.achievements ?? []) {
+    const fields = {
+      name: a.name,
+      icon: a.icon,
+      descriptionMd: a.descriptionMd ?? "",
+      title: a.title ?? "",
+      credReward: a.credReward ?? 0,
+      priority: a.priority ?? 0,
+      hidden: a.hidden ?? false,
+      ruleJson: JSON.stringify(a.rule),
+    };
+    await prisma.achievement.upsert({
+      where: { eventId_key: { eventId: event.id, key: a.key } },
+      update: fields,
+      create: { eventId: event.id, key: a.key, ...fields },
+    });
+  }
+
   return event;
 }
 
@@ -251,10 +287,10 @@ const demoEvent: EventSeed = {
     { key: "keycard-demo", name: "Practice Keycard", type: "keycard", icon: "🔑", descriptionMd: "Opens THE DESK." },
   ],
   npc: {
-    slug: "sudo",
-    name: "SUDO",
-    icon: "🟢",
-    blurbMd: "`> SUDO online.`\n\nI trade. Bring me shards, I make keycards. Bring me junk, I make it creds. Don't bring me your feelings.",
+    slug: "shop",
+    name: "The Shop",
+    icon: "🛒",
+    blurbMd: "`> shop.exe — back-room fabricator & fence.`\n\nBring me shards, I make keycards. Bring me junk, I make it creds. Bring me your feelings, I make you leave.",
     trades: [
       {
         label: "Forge the Practice Keycard",
@@ -265,12 +301,19 @@ const demoEvent: EventSeed = {
       },
     ],
   },
+  achievements: [
+    { key: "demo-first", name: "Warmed Up", icon: "👣", credReward: 5, rule: { kind: "map-runner", n: 1 } },
+    { key: "demo-forge", name: "Fabricator", icon: "🔧", title: "the Fabricator", priority: 10, credReward: 10, rule: { kind: "map-runner", n: 2 } },
+    { key: "demo-vent", name: "Right on Time", icon: "⏰", title: "the Punctual", priority: 20, credReward: 10, rule: { kind: "time-room" } },
+  ],
   modules: [
     {
       slug: "door",
       title: "D0 · THE DOOR",
       theme: "green",
       blurb: "It's not even locked. Push.",
+      map: { x: 1, y: 0 },
+      edges: ["locker", "desk"],
       clearReward: { "frag-demo": 1 },
       puzzles: [
         {
@@ -291,6 +334,8 @@ const demoEvent: EventSeed = {
       title: "D1 · THE LOCKER",
       theme: "cyan",
       blurb: "Meet the toolkit.",
+      map: { x: 3, y: 0 },
+      edges: ["door", "vent"],
       clearReward: { cred: 10 },
       puzzles: [
         {
@@ -318,7 +363,9 @@ Open the **toolkit** and run \`caesar "${caesar(D_LOCKER_PLAIN, 3)}" all\` — o
       slug: "desk",
       title: "D2 · THE DESK",
       theme: "magenta",
-      blurb: "The drawer's locked. Its keycard comes from SUDO — two shards.",
+      blurb: "The drawer's locked. Its keycard comes from the Shop — two shards.",
+      map: { x: 1, y: 2 },
+      edges: ["door"],
       prereq: { "keycard-demo": 1 },
       clearReward: { cred: 10 },
       puzzles: [
@@ -330,12 +377,35 @@ Open the **toolkit** and run \`caesar "${caesar(D_LOCKER_PLAIN, 3)}" all\` — o
           validatorConfig: { answer: "CMINUS{DR4W3R_0P3N}" },
           rewards: { cred: 15 },
           promptMd:
-            "You forged a keycard from two shards and the door opened. That's the whole loop: **crack rooms → collect shards → SUDO turns them into keycards → new rooms open.** Now unlock the intel below (you're holding the keycard) and it'll give you the flag.",
+            "You forged a keycard from two shards and the door opened. That's the whole loop: **crack rooms → collect shards → the Shop turns them into keycards → new rooms open.** Now unlock the intel below (you're holding the keycard) and it'll give you the flag.",
         },
       ],
       hints: [
         { contentMd: "You made it in. The flag is `CMINUS{DR4W3R_0P3N}`.", rule: { kind: "item", key: "keycard-demo" } },
       ],
+    },
+    {
+      slug: "vent",
+      title: "D3 · THE VENT",
+      theme: "amber",
+      blurb: "Only open for 2 minutes at a time. Watch the map and dash in.",
+      map: { x: 4, y: 2 },
+      edges: ["locker"],
+      unlock: { recurring: { everyMin: 5, openMin: 2 } },
+      clearReward: { cred: 10 },
+      puzzles: [
+        {
+          slug: "vent-quick",
+          title: "Quick — before it shuts",
+          basePoints: 40,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{1N_4ND_0UT}" },
+          rewards: { cred: 20 },
+          promptMd:
+            "This room opens **2 minutes every 5**. The flag is `CMINUS{1N_4ND_0UT}` — submit it while you're here. (Once you've had a go, the map won't lock you out mid-attempt.)",
+        },
+      ],
+      hints: [{ contentMd: "It's right there in the prompt. This one's about the *timing*.", rule: { kind: "free" } }],
     },
   ],
 };
@@ -354,24 +424,40 @@ const mainEvent: EventSeed = {
   status: "draft",
   items: [
     { key: "cred", name: "Cred", type: "cred", icon: "💰", stackable: true },
-    { key: "frag-alpha", name: "Alpha Shard", type: "fragment", icon: "🧩", stackable: true, descriptionMd: "Three forge a **Red Keycard** at SUDO." },
-    { key: "frag-beta", name: "Beta Shard", type: "fragment", icon: "🧩", stackable: true, descriptionMd: "Three forge a **Black Keycard** at SUDO." },
+    { key: "frag-alpha", name: "Alpha Shard", type: "fragment", icon: "🧩", stackable: true, descriptionMd: "Three forge a **Red Keycard** at the Shop." },
+    { key: "frag-beta", name: "Beta Shard", type: "fragment", icon: "🧩", stackable: true, descriptionMd: "Three forge a **Black Keycard** at the Shop." },
     { key: "keycard-blue", name: "Blue Keycard", type: "keycard", icon: "🔑", descriptionMd: "Opens the **Server Closet**." },
     { key: "keycard-red", name: "Red Keycard", type: "keycard", icon: "🔑", descriptionMd: "Opens the **Security Office**." },
     { key: "keycard-green", name: "Green Keycard", type: "keycard", icon: "🔑", descriptionMd: "Opens the **Maintenance Tunnels**." },
     { key: "keycard-black", name: "Black Keycard", type: "keycard", icon: "🔑", descriptionMd: "One of three that open **THE CORE**." },
     { key: "keycard-master", name: "Master Keycard", type: "keycard", icon: "🗝️", descriptionMd: "**THE CORE** is open." },
-    { key: "loot-old-badge", name: "Corroded ID Badge", type: "loot", icon: "💾", sellValue: 15, descriptionMd: "Belonged to someone who worked here. SUDO buys these." },
+    { key: "loot-old-badge", name: "Corroded ID Badge", type: "loot", icon: "💾", sellValue: 15, descriptionMd: "Belonged to someone who worked here. The shop buys these." },
     { key: "loot-coffee", name: "Cold Coffee", type: "loot", icon: "☕", sellValue: 5, descriptionMd: "Why did you pick this up." },
     { key: "trophy-sweettooth", name: "Sweet Tooth", type: "trophy", icon: "🍯", descriptionMd: "You walked into the honeypot and walked back out." },
+    { key: "trophy-onair", name: "On Air", type: "trophy", icon: "📻", descriptionMd: "You made the broadcast window." },
     { key: "trophy-root", name: "root", type: "trophy", icon: "👑", descriptionMd: "You own THE STACK." },
   ],
+  achievements: [
+    { key: "first-steps", name: "First Steps", icon: "👣", descriptionMd: "Clear your first room.", credReward: 15, rule: { kind: "map-runner", n: 1 } },
+    { key: "spelunker", name: "Spelunker", icon: "🗺️", descriptionMd: "Clear 5 rooms.", credReward: 30, rule: { kind: "map-runner", n: 5 } },
+    { key: "completionist", name: "Completionist", icon: "🏆", descriptionMd: "Clear every room in THE STACK.", title: "the Completionist", priority: 90, credReward: 120, rule: { kind: "all-rooms" } },
+    { key: "unhinted", name: "Unhinted", icon: "🧠", descriptionMd: "Clear 3 rooms without opening a single hint.", title: "the Unhinted", priority: 45, credReward: 50, rule: { kind: "no-hint-clear", n: 3 } },
+    { key: "flawless", name: "Flawless", icon: "💎", descriptionMd: "Clear 3 rooms with zero wrong guesses.", title: "the Flawless", priority: 50, credReward: 50, rule: { kind: "flawless-clear", n: 3 } },
+    { key: "first-light", name: "First Light", icon: "🩸", descriptionMd: "Draw first blood on any room.", title: "First Light", priority: 30, credReward: 25, rule: { kind: "first-blood", n: 1 } },
+    { key: "bloodhound", name: "Bloodhound", icon: "🐺", descriptionMd: "Draw first blood on 3 rooms.", title: "the Bloodhound", priority: 65, credReward: 60, rule: { kind: "first-blood", n: 3 } },
+    { key: "speed-demon", name: "Speed Demon", icon: "⚡", descriptionMd: "Crack a room within 2 minutes of it opening for you.", title: "Speed Demon", priority: 55, credReward: 40, rule: { kind: "speed", withinSec: 120 } },
+    { key: "loaded", name: "Loaded", icon: "💰", descriptionMd: "Hold 400 creds at once.", credReward: 20, rule: { kind: "creds-held", amount: 400 } },
+    { key: "regular", name: "The Regular", icon: "🧾", descriptionMd: "Spend 150 creds at the shop.", title: "the Regular", priority: 20, credReward: 20, rule: { kind: "big-spender", spent: 150 } },
+    { key: "punctual", name: "Punctual", icon: "⏰", descriptionMd: "Clear a room that's only open on a timer.", title: "the Punctual", priority: 60, credReward: 50, rule: { kind: "time-room" } },
+    { key: "night-shift", name: "Night Shift", icon: "🌙", descriptionMd: "Solve something in the final 45 minutes.", title: "Night Shift", priority: 25, credReward: 30, rule: { kind: "after", iso: "2026-09-16T17:45:00.000Z" } },
+    { key: "collector", name: "The Collector", icon: "🗃️", descriptionMd: "Hold every trophy.", title: "the Collector", priority: 80, credReward: 80, hidden: true, rule: { kind: "all-trophies" } },
+  ],
   npc: {
-    slug: "sudo",
-    name: "SUDO",
-    icon: "🟢",
+    slug: "shop",
+    name: "The Shop",
+    icon: "🛒",
     blurbMd:
-      "`> SUDO: a daemon with a shop.`\n\nI forge keycards from shards, I sell the odd tip, and I pay creds for junk you drag out of there. Everything's a trade. No small talk.",
+      "`> shop.exe — the only vendor left in THE STACK.`\n\nI forge keycards from shards, I sell the odd tip, and I pay creds for junk you drag out of there. Everything's a trade. No small talk.",
     trades: [
       {
         label: "Forge a Red Keycard",
@@ -423,6 +509,8 @@ const mainEvent: EventSeed = {
       title: "R0 · THE LOBBY",
       theme: "green",
       blurb: "Ground floor. Everyone starts here. Small loot, good habits.",
+      map: { x: 1, y: 0, zone: "entrance" },
+      edges: ["reception", "server-closet"],
       clearReward: { cred: 10 },
       puzzles: [
         {
@@ -443,6 +531,8 @@ const mainEvent: EventSeed = {
       title: "R1 · RECEPTION",
       theme: "cyan",
       blurb: "The front desk. A sticky note, badly hidden.",
+      map: { x: 3, y: 0, zone: "entrance" },
+      edges: ["lobby", "mailroom", "security"],
       clearReward: { cred: 15 },
       puzzles: [
         {
@@ -472,6 +562,8 @@ Lazy route: open the **toolkit**, run \`caesar "…" all\`, and read down for th
       title: "R2 · THE MAILROOM",
       theme: "amber",
       blurb: "A shared inbox nobody cleaned out.",
+      map: { x: 5, y: 0, zone: "entrance" },
+      edges: ["reception", "honeypot", "tunnels"],
       clearReward: { cred: 10, "loot-coffee": 1 },
       puzzles: [
         {
@@ -500,6 +592,8 @@ Lazy route: open the **toolkit**, run \`caesar "…" all\`, and read down for th
       title: "R3 · SERVER CLOSET",
       theme: "green",
       blurb: "Hot, loud, and locked. You'll need the Blue Keycard from Reception.",
+      map: { x: 2, y: 2, zone: "sublevel" },
+      edges: ["lobby", "broadcast-booth"],
       prereq: { "keycard-blue": 1 },
       clearReward: { cred: 15 },
       puzzles: [
@@ -539,7 +633,9 @@ motd=CMINUS{D1FF_TH3_C0NF1G}
       slug: "security",
       title: "R4 · SECURITY OFFICE",
       theme: "amber",
-      blurb: "CCTV and badge logs. Needs the Red Keycard — forge it at SUDO from 3 Alpha Shards.",
+      blurb: "CCTV and badge logs. Needs the Red Keycard — forge it at the Shop from 3 Alpha Shards.",
+      map: { x: 4, y: 2, zone: "sublevel" },
+      edges: ["reception", "broadcast-booth"],
       prereq: { "keycard-red": 1 },
       clearReward: { cred: 20 },
       puzzles: [
@@ -570,6 +666,8 @@ Who was in the server room? Answer as \`CMINUS{IT_WAS_<NAME IN CAPS>}\`.`,
       title: "R5 · THE HONEYPOT",
       theme: "red",
       blurb: "Bait. It's covered in flags. Wrong guesses cost creds.",
+      map: { x: 7, y: 0, zone: "entrance" },
+      edges: ["mailroom", "supply-drop"],
       clearReward: { cred: 10 },
       puzzles: [
         {
@@ -599,6 +697,8 @@ CMINUS{ has a space }
       title: "R6 · MAINTENANCE TUNNELS",
       theme: "magenta",
       blurb: "Dark, damp, and locked. Needs the Green Keycard.",
+      map: { x: 6, y: 2, zone: "sublevel" },
+      edges: ["mailroom", "the-core"],
       prereq: { "keycard-green": 1 },
       clearReward: { cred: 20 },
       puzzles: [
@@ -636,7 +736,9 @@ Read it backwards. Toolkit: \`reverse "…"\`.`,
       slug: "the-core",
       title: "R7 · THE CORE",
       theme: "red",
-      blurb: "The heart of THE STACK. SUDO opens it — you bring the three keycards.",
+      blurb: "The heart of THE STACK. The Shop opens it — you bring the three keycards.",
+      map: { x: 6, y: 4, zone: "core" },
+      edges: ["tunnels", "supply-drop", "broadcast-booth"],
       prereq: { "keycard-master": 1 },
       clearReward: { cred: 50 },
       puzzles: [
@@ -648,7 +750,7 @@ Read it backwards. Toolkit: \`reverse "…"\`.`,
           perUserFlag: true,
           validatorConfig: { perUser: true },
           rewards: { cred: 100, "trophy-root": 1 },
-          promptMd: `SUDO fed the door your three keycards and it opened. The core coughs up one last string — **yours, nobody else's**:
+          promptMd: `The Shop fed the door your three keycards and it opened. The core coughs up one last string — **yours, nobody else's**:
 
 \`\`\`
 {{flagB64}}
@@ -659,6 +761,69 @@ It's base64. Decode it. Toolkit: \`unbase64 "…"\`. Then paste what comes out.`
       ],
       hints: [
         { contentMd: 'toolkit → `unbase64 "<that string>"` → paste the result. Done.', rule: { kind: "free" } },
+      ],
+    },
+    {
+      slug: "broadcast-booth",
+      title: "R8 · BROADCAST BOOTH",
+      theme: "cyan",
+      blurb: "The old PA system. It only powers up for one short window all night — check the map for the countdown.",
+      map: { x: 3, y: 4, zone: "core" },
+      edges: ["server-closet", "security", "the-core"],
+      // one-shot window — admin editable. Default: 20:30–21:00 IST (mid-event).
+      unlock: {
+        windowAt: { from: "2026-09-16T15:00:00.000Z", to: "2026-09-16T15:30:00.000Z" },
+      },
+      clearReward: { cred: 30, "trophy-onair": 1 },
+      puzzles: [
+        {
+          slug: "booth-morse",
+          title: "On the air",
+          basePoints: 220,
+          difficulty: "medium",
+          validatorConfig: { answer: "CMINUS{L1V3_0N_41R}" },
+          rewards: { cred: 60, "frag-alpha": 1 },
+          promptMd: `The booth is broadcasting one loop, in Morse:
+
+\`\`\`
+.-.. .---- ...- ...-- / ----- -. / ....- .---- .-.
+\`\`\`
+
+Decode it. Toolkit: \`unmorse "..."\` (\`/\` is a space). Then wrap the words with \`_\` between them: \`CMINUS{..._..._...}\`.`,
+        },
+      ],
+      hints: [
+        { contentMd: "toolkit → `unmorse \"<the dots and dashes>\"`. The `/` marks are spaces.", rule: { kind: "free" } },
+      ],
+    },
+    {
+      slug: "supply-drop",
+      title: "R9 · SUPPLY DROP",
+      theme: "green",
+      blurb: "A chute that drops loot on a timer — open ~10 minutes every 30. Dash in when the map lights it up.",
+      map: { x: 8, y: 2, zone: "sublevel" },
+      edges: ["honeypot", "the-core"],
+      unlock: { recurring: { everyMin: 30, openMin: 10 } },
+      clearReward: { cred: 15 },
+      puzzles: [
+        {
+          slug: "drop-grab",
+          title: "Grab the crate",
+          basePoints: 90,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{5UPPLY_5N4TCH3D}" },
+          rewards: { cred: 30, "frag-beta": 1 },
+          promptMd: `A crate label, base64'd:
+
+\`\`\`
+Q01JTlVTezVVUFBMWV81TjRUQ0gzRH0=
+\`\`\`
+
+\`unbase64\` it in the toolkit and submit what comes out. Be quick — the chute closes.`,
+        },
+      ],
+      hints: [
+        { contentMd: "toolkit → `unbase64 \"Q01JTlVTezVVUFBMWV81TjRUQ0gzRH0=\"`.", rule: { kind: "free" } },
       ],
     },
   ],
@@ -706,13 +871,13 @@ async function main() {
   await seedUser({ registerId: "ADMIN001", password: "admin-pass-2026", displayName: "Event Control", role: "admin", eventSlug: "pseudo-breach-main" });
   await seedUser({ registerId: "PB-DEMO-01", password: "demo-pass-01", displayName: "Demo Tester", branch: "CSE", year: "1", eventSlug: "demo-session" });
   await seedUser({ registerId: "PB-MAIN-01", password: "main-pass-01", displayName: "Main Tester", branch: "CSE", year: "1", eventSlug: "pseudo-breach-main" });
-  for (let i = 2; i <= 6; i++) {
+  for (let i = 2; i <= 10; i++) {
     await seedUser({
       registerId: `PB-MAIN-${String(i).padStart(2, "0")}`,
       password: `main-pass-${String(i).padStart(2, "0")}`,
       displayName: `Test Player ${i}`,
       branch: ["CSE", "ECE", "MECH", "IT", "EEE"][i % 5],
-      year: "1",
+      year: ["1", "2", "3", "4"][i % 4],
       eventSlug: "pseudo-breach-main",
     });
   }
@@ -724,6 +889,7 @@ async function main() {
     puzzles: await prisma.puzzle.count(),
     hints: await prisma.hint.count(),
     trades: await prisma.npcTrade.count(),
+    achievements: await prisma.achievement.count(),
     users: await prisma.user.count(),
   });
 }

@@ -1,7 +1,19 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono } from "next/font/google";
+import { Chakra_Petch, IBM_Plex_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
+const display = Chakra_Petch({
+  variable: "--font-chakra",
+  weight: ["500", "600", "700"],
+  subsets: ["latin"],
+  display: "swap",
+});
+const sans = IBM_Plex_Sans({
+  variable: "--font-plex",
+  weight: ["400", "500", "600"],
+  subsets: ["latin"],
+  display: "swap",
+});
 const mono = JetBrains_Mono({
   variable: "--font-jetbrains",
   subsets: ["latin"],
@@ -10,13 +22,16 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "PSEUDO-BREACH",
-  description: "Solve puzzles. Hack modules. Climb the board. Not actual hacking.",
+  description: "Break into THE STACK, room by room. Not actual hacking.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${mono.variable} h-full antialiased`}>
-      <body className="scanlines min-h-full flex flex-col">{children}</body>
+    <html
+      lang="en"
+      className={`${display.variable} ${sans.variable} ${mono.variable} h-full antialiased`}
+    >
+      <body className="scanlines flex min-h-full flex-col">{children}</body>
     </html>
   );
 }

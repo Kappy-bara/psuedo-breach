@@ -1,11 +1,11 @@
 import type { Item } from "@prisma/client";
 
 const typeColor: Record<string, string> = {
-  cred: "border-accent-amber/40 text-accent-amber",
-  keycard: "border-accent-cyan/40 text-accent-cyan",
+  cred: "border-signal/40 text-signal",
+  keycard: "border-accent/40 text-accent",
   fragment: "border-accent-magenta/40 text-accent-magenta",
   loot: "border-border text-ink",
-  trophy: "border-accent/40 text-accent",
+  trophy: "border-signal/40 text-signal",
 };
 
 export function ItemChip({

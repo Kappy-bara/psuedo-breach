@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { runLine } from "@/lib/toolbox";
 
-const out = async (line: string) => (await runLine(line)).out;
 const okOut = async (line: string) => {
   const r = await runLine(line);
   expect(r.ok, r.out).toBe(true);

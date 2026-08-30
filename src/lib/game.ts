@@ -2,8 +2,14 @@ import { prisma } from "@/lib/db";
 import { parseJson } from "@/lib/json";
 import { renderPrompt } from "@/lib/prompt";
 import { userFlag } from "@/lib/flags";
-import { type ItemMap, holds, getInventoryMap } from "@/lib/inventory";
-import type { Event, Hint, Item, Module, Puzzle, User } from "@prisma/client";
+import { type ItemMap, getInventoryMap } from "@/lib/inventory";
+import {
+  evaluateUnlock,
+  parseUnlockRule,
+  type UnlockCtx,
+  type UnlockKind,
+} from "@/lib/unlock";
+import type { Event, Hint, Item, Puzzle, User } from "@prisma/client";
 
 /* ─────────────────────────── events ─────────────────────────── */
 
@@ -30,7 +36,6 @@ export async function getItemCatalog(eventId: string): Promise<Map<string, Item>
   return new Map(items.map((i) => [i.key, i]));
 }
 
-/** "🔑 Red Keycard ×1, 🧩 Shard ×2" */
 export function describeItemMap(map: ItemMap, catalog: Map<string, Item>): string {
   return (
     Object.entries(map)
@@ -44,7 +49,9 @@ export function describeItemMap(map: ItemMap, catalog: Map<string, Item>): strin
   );
 }
 
-/* ─────────────────────────── modules ─────────────────────────── */
+/* ─────────────────────────── the map / rooms ─────────────────────────── */
+
+export type Medal = "gold" | "silver" | "bronze" | null;
 
 export interface ModuleCardView {
   slug: string;
@@ -52,33 +59,46 @@ export interface ModuleCardView {
   blurb: string;
   theme: string;
   order: number;
+  mapX: number;
+  mapY: number;
+  mapZone: string;
+  edges: string[];
   locked: boolean;
   lockedReason: string | null;
+  unlockKind: UnlockKind;
+  opensAt: number | null;
+  closesAt: number | null;
   solvedCount: number;
   puzzleCount: number;
   pointsAvailable: number;
   pointsEarned: number;
   cleared: boolean;
+  yourMedal: Medal;
 }
 
-function moduleLockReason(
-  module: Module,
+function unlockCtxFor(
+  user: User,
+  event: Event,
   inv: ItemMap,
+  clearedSlugs: Set<string>,
+  touchedSlugs: Set<string>,
+  slug: string,
   catalog: Map<string, Item>,
-  now: Date,
-  cleared: boolean,
-): string | null {
-  if (cleared) return null; // a room you've cleared never re-locks (keycards may get spent later)
-  const need = parseJson<ItemMap>(module.prerequisiteItemsJson, {});
-  const { ok, missing } = holds(inv, need);
-  if (!ok) return `Locked — need ${describeItemMap(missing, catalog)}`;
-  if (module.unlockAt && now < module.unlockAt) return `Opens later`;
-  return null;
+): UnlockCtx {
+  return {
+    inv,
+    clearedSlugs,
+    touchedSlugs,
+    now: Date.now(),
+    eventStart: event.startsAt.getTime(),
+    slug,
+    itemName: (k) => catalog.get(k)?.name ?? k,
+  };
 }
 
 export async function getModuleCards(user: User): Promise<ModuleCardView[]> {
-  const now = new Date();
-  const [modules, inv, catalog, solves] = await Promise.all([
+  const event = await prisma.event.findUniqueOrThrow({ where: { id: user.eventId } });
+  const [modules, inv, catalog, solves, wrongSubs] = await Promise.all([
     prisma.module.findMany({
       where: { eventId: user.eventId, isHidden: false },
       orderBy: { order: "asc" },
@@ -88,23 +108,62 @@ export async function getModuleCards(user: User): Promise<ModuleCardView[]> {
     getItemCatalog(user.eventId),
     prisma.solve.findMany({
       where: { userId: user.id },
-      select: { puzzleId: true, basePts: true, bonusPts: true },
+      select: { puzzleId: true, solveIndex: true, basePts: true, bonusPts: true },
+    }),
+    prisma.submission.findMany({
+      where: { userId: user.id },
+      select: { puzzle: { select: { moduleId: true } } },
     }),
   ]);
   const solveByPuzzle = new Map(solves.map((s) => [s.puzzleId, s]));
 
+  const bySlug = new Map(modules.map((m) => [m.id, m.slug]));
+  const clearedSlugs = new Set<string>();
+  const touchedSlugs = new Set<string>();
+  for (const m of modules) {
+    const done = m.puzzles.length > 0 && m.puzzles.every((p) => solveByPuzzle.has(p.id));
+    if (done) clearedSlugs.add(m.slug);
+  }
+  for (const s of wrongSubs) {
+    const slug = bySlug.get(s.puzzle.moduleId);
+    if (slug) touchedSlugs.add(slug);
+  }
+  // a solve also counts as "touched"
+  for (const m of modules)
+    if (m.puzzles.some((p) => solveByPuzzle.has(p.id))) touchedSlugs.add(m.slug);
+
   return modules.map((m) => {
     const solved = m.puzzles.filter((p) => solveByPuzzle.has(p.id));
     const cleared = m.puzzles.length > 0 && solved.length === m.puzzles.length;
-    const reason = moduleLockReason(m, inv, catalog, now, cleared);
+    const rule = parseUnlockRule(m.unlockRuleJson);
+    const state = evaluateUnlock(
+      rule,
+      unlockCtxFor(user, event, inv, clearedSlugs, touchedSlugs, m.slug, catalog),
+    );
+    const locked = !cleared && !state.unlocked;
+
+    // your best medal in this room (lowest solveIndex across its puzzles)
+    const bestIdx = Math.min(
+      ...m.puzzles.map((p) => solveByPuzzle.get(p.id)?.solveIndex ?? 99),
+    );
+    const yourMedal: Medal =
+      bestIdx <= 2 ? (["gold", "silver", "bronze"][bestIdx] as Medal) : null;
+
     return {
       slug: m.slug,
       title: m.title,
       blurb: m.blurb,
       theme: m.theme,
       order: m.order,
-      locked: reason !== null,
-      lockedReason: reason,
+      mapX: m.mapX,
+      mapY: m.mapY,
+      mapZone: m.mapZone,
+      edges: parseJson<string[]>(m.mapEdgesJson, []),
+      locked,
+      lockedReason: locked ? state.reason : null,
+      unlockKind: state.kind,
+      opensAt: state.opensAt,
+      closesAt: cleared ? null : state.closesAt,
       solvedCount: solved.length,
       puzzleCount: m.puzzles.length,
       pointsAvailable: m.puzzles.reduce((a, p) => a + p.basePoints, 0),
@@ -114,8 +173,31 @@ export async function getModuleCards(user: User): Promise<ModuleCardView[]> {
         0,
       ),
       cleared,
+      yourMedal,
     };
   });
+}
+
+/* ─────────────────────────── room medals ─────────────────────────── */
+
+export interface MedalHolder {
+  place: 1 | 2 | 3;
+  displayName: string;
+  timeSec: number;
+}
+
+export async function getRoomMedals(puzzleIds: string[]): Promise<MedalHolder[]> {
+  if (puzzleIds.length === 0) return [];
+  const solves = await prisma.solve.findMany({
+    where: { puzzleId: { in: puzzleIds }, solveIndex: { lte: 2 } },
+    orderBy: { solveIndex: "asc" },
+    select: { solveIndex: true, timeToSolveSec: true, user: { select: { displayName: true } } },
+  });
+  return solves.slice(0, 3).map((s) => ({
+    place: (s.solveIndex + 1) as 1 | 2 | 3,
+    displayName: s.user.displayName,
+    timeSec: s.timeToSolveSec,
+  }));
 }
 
 /* ─────────────────────────── module detail ─────────────────────────── */
@@ -132,7 +214,7 @@ export interface HintView {
   order: number;
   unlocked: boolean;
   lockedHint: string;
-  buyCost: number | null; // set when the rule is "buy" and it's not unlocked yet
+  buyCost: number | null;
   contentMd: string | null;
 }
 
@@ -161,18 +243,16 @@ export interface ModuleDetailView {
   theme: string;
   locked: boolean;
   lockedReason: string | null;
+  opensAt: number | null;
+  closesAt: number | null;
   clearRewardLabel: string | null;
   cleared: boolean;
   puzzles: PuzzleView[];
   hints: HintView[];
+  medals: MedalHolder[];
 }
 
-function hintUnlocked(
-  hint: Hint,
-  alreadyUnlocked: boolean,
-  inv: ItemMap,
-  wrongCount: number,
-): boolean {
+function hintUnlocked(hint: Hint, alreadyUnlocked: boolean, inv: ItemMap, wrongCount: number): boolean {
   if (alreadyUnlocked) return true;
   const rule = parseJson<HintUnlockRule>(hint.unlockRule, { kind: "free" });
   switch (rule.kind) {
@@ -199,7 +279,7 @@ function lockedHintLabel(rule: HintUnlockRule, catalog: Map<string, Item>): stri
     case "buy":
       return `Buy for ${rule.cost} 💰`;
     case "npc":
-      return `Only from SUDO`;
+      return `Only from the Shop`;
     default:
       return "Locked";
   }
@@ -209,18 +289,18 @@ export async function getModuleDetail(
   user: User,
   slug: string,
 ): Promise<ModuleDetailView | null> {
-  const now = new Date();
-  const module = await prisma.module.findUnique({
+  const event = await prisma.event.findUniqueOrThrow({ where: { id: user.eventId } });
+  const room = await prisma.module.findUnique({
     where: { eventId_slug: { eventId: user.eventId, slug } },
     include: {
       puzzles: { where: { isHidden: false }, orderBy: { order: "asc" } },
       hints: { orderBy: { order: "asc" } },
     },
   });
-  if (!module || module.isHidden) return null;
+  if (!room || room.isHidden) return null;
 
-  const puzzleIds = module.puzzles.map((p) => p.id);
-  const [inv, catalog, solves, submissions, hintUnlocks] = await Promise.all([
+  const puzzleIds = room.puzzles.map((p) => p.id);
+  const [inv, catalog, solves, submissions, hintUnlocks, medals, allSolves] = await Promise.all([
     getInventoryMap(user.id),
     getItemCatalog(user.eventId),
     prisma.solve.findMany({ where: { userId: user.id, puzzleId: { in: puzzleIds } } }),
@@ -229,14 +309,50 @@ export async function getModuleDetail(
       orderBy: { createdAt: "desc" },
     }),
     prisma.hintUnlock.findMany({
-      where: { userId: user.id, hintId: { in: module.hints.map((h) => h.id) } },
+      where: { userId: user.id, hintId: { in: room.hints.map((h) => h.id) } },
       select: { hintId: true },
     }),
+    getRoomMedals(puzzleIds),
+    prisma.solve.findMany({ where: { userId: user.id }, select: { puzzle: { select: { moduleId: true, module: { select: { slug: true } } } } } }),
   ]);
   const solveByPuzzle = new Map(solves.map((s) => [s.puzzleId, s]));
   const cleared =
-    module.puzzles.length > 0 && module.puzzles.every((p) => solveByPuzzle.has(p.id));
-  const reason = moduleLockReason(module, inv, catalog, now, cleared);
+    room.puzzles.length > 0 && room.puzzles.every((p) => solveByPuzzle.has(p.id));
+
+  // unlock state — need cleared + touched across all rooms
+  const allModules = await prisma.module.findMany({
+    where: { eventId: user.eventId },
+    select: { slug: true, id: true, puzzles: { select: { id: true } } },
+  });
+  const mySolvedPuzzleIds = new Set(
+    (await prisma.solve.findMany({ where: { userId: user.id }, select: { puzzleId: true } })).map(
+      (s) => s.puzzleId,
+    ),
+  );
+  const clearedSlugs = new Set(
+    allModules
+      .filter((m) => m.puzzles.length > 0 && m.puzzles.every((p) => mySolvedPuzzleIds.has(p.id)))
+      .map((m) => m.slug),
+  );
+  const touchedSlugs = new Set(allSolves.map((s) => s.puzzle.module.slug));
+  const myWrong = await prisma.submission.findMany({
+    where: { userId: user.id, isCorrect: false },
+    select: { puzzle: { select: { module: { select: { slug: true } } } } },
+  });
+  for (const w of myWrong) touchedSlugs.add(w.puzzle.module.slug);
+
+  const state = cleared
+    ? { unlocked: true, reason: null, opensAt: null, closesAt: null }
+    : evaluateUnlock(parseUnlockRule(room.unlockRuleJson), {
+        inv,
+        clearedSlugs,
+        touchedSlugs,
+        now: Date.now(),
+        eventStart: event.startsAt.getTime(),
+        slug: room.slug,
+        itemName: (k) => catalog.get(k)?.name ?? k,
+      });
+
   const unlockedHintIds = new Set(hintUnlocks.map((u) => u.hintId));
   const wrongCounts = new Map<string, number>();
   const lastWrong = new Map<string, Date>();
@@ -245,7 +361,7 @@ export async function getModuleDetail(
     if (!lastWrong.has(s.puzzleId)) lastWrong.set(s.puzzleId, s.createdAt);
   }
 
-  const puzzles: PuzzleView[] = module.puzzles.map((p: Puzzle) => {
+  const puzzles: PuzzleView[] = room.puzzles.map((p: Puzzle) => {
     const cfg = parseJson<{
       leakInSource?: boolean;
       answer?: string;
@@ -282,7 +398,7 @@ export async function getModuleDetail(
     };
   });
 
-  const hints: HintView[] = module.hints.map((h) => {
+  const hints: HintView[] = room.hints.map((h) => {
     const rule = parseJson<HintUnlockRule>(h.unlockRule, { kind: "free" });
     const wc = h.puzzleId ? (wrongCounts.get(h.puzzleId) ?? 0) : 0;
     const unlocked = hintUnlocked(h, unlockedHintIds.has(h.id), inv, wc);
@@ -296,21 +412,24 @@ export async function getModuleDetail(
     };
   });
 
-  const clearReward = parseJson<ItemMap>(module.clearRewardJson, {});
+  const clearReward = parseJson<ItemMap>(room.clearRewardJson, {});
 
   return {
-    slug: module.slug,
-    title: module.title,
-    blurb: module.blurb,
-    theme: module.theme,
-    locked: reason !== null,
-    lockedReason: reason,
+    slug: room.slug,
+    title: room.title,
+    blurb: room.blurb,
+    theme: room.theme,
+    locked: !state.unlocked,
+    lockedReason: state.unlocked ? null : state.reason,
+    opensAt: state.opensAt,
+    closesAt: state.closesAt,
     clearRewardLabel: Object.keys(clearReward).length
       ? describeItemMap(clearReward, catalog)
       : null,
     cleared,
     puzzles,
     hints,
+    medals,
   };
 }
 
@@ -329,6 +448,7 @@ export interface LeaderRow {
   userId: string;
   displayName: string;
   branch: string;
+  year: string;
   score: number;
   solveCount: number;
   lastSolveAt: number | null;
@@ -353,6 +473,7 @@ export async function getLeaderboard(
       id: true,
       displayName: true,
       branch: true,
+      year: true,
       solves: { select: { basePts: true, bonusPts: true, solvedAt: true } },
     },
   });
@@ -368,6 +489,7 @@ export async function getLeaderboard(
         userId: u.id,
         displayName: u.displayName,
         branch: u.branch,
+        year: u.year,
         score,
         solveCount: u.solves.length,
         lastSolveAt: last,
@@ -384,6 +506,46 @@ export async function getLeaderboard(
 
   boardCache.set(eventId, { at: Date.now(), rows });
   return rows;
+}
+
+export interface YearRow {
+  year: string;
+  totalScore: number;
+  members: number;
+  solves: number;
+  topPlayer: string;
+}
+
+export async function getYearBoard(eventId: string): Promise<YearRow[]> {
+  const rows = await getLeaderboard(eventId);
+  const byYear = new Map<string, YearRow & { _topScore: number }>();
+  for (const r of rows) {
+    const y = r.year || "—";
+    const cur =
+      byYear.get(y) ??
+      ({ year: y, totalScore: 0, members: 0, solves: 0, topPlayer: "", _topScore: -1 } as YearRow & {
+        _topScore: number;
+      });
+    cur.totalScore += r.score;
+    cur.members += 1;
+    cur.solves += r.solveCount;
+    if (r.score > cur._topScore) {
+      cur._topScore = r.score;
+      cur.topPlayer = r.displayName;
+    }
+    byYear.set(y, cur);
+  }
+  return [...byYear.values()]
+    .map(
+      (r): YearRow => ({
+        year: r.year,
+        totalScore: r.totalScore,
+        members: r.members,
+        solves: r.solves,
+        topPlayer: r.topPlayer,
+      }),
+    )
+    .sort((a, b) => b.totalScore - a.totalScore);
 }
 
 /* ─────────────────────────── announcements ─────────────────────────── */

@@ -4,13 +4,11 @@ import { scoreSolve, SCORING } from "@/lib/scoring";
 import { whichUserMintedFlag } from "@/lib/flags";
 import { parseJson } from "@/lib/json";
 import { eventPhase } from "@/lib/game";
-import {
-  type ItemMap,
-  holds,
-  grantItems,
-  getInventoryMap,
-  spendCredsFloor,
-} from "@/lib/inventory";
+import { evaluateUnlock, parseUnlockRule } from "@/lib/unlock";
+import { emitFeed } from "@/lib/feed";
+import { checkAchievements, type UnlockedAch } from "@/lib/achievements";
+import { type ItemMap, grantItems, getInventoryMap, spendCredsFloor } from "@/lib/inventory";
+import type { Medal } from "@/lib/game";
 import type { User } from "@prisma/client";
 
 export type SubmitOutcome =
@@ -19,8 +17,10 @@ export type SubmitOutcome =
       base: number;
       bonus: number;
       solveIndex: number;
-      rewards: ItemMap; // loot from the puzzle + room-clear + first blood, merged
+      medal: Medal;
+      rewards: ItemMap;
       roomCleared: boolean;
+      newAchievements: { name: string; icon: string; title: string; credReward: number }[];
     }
   | { status: "already-solved" }
   | { status: "wrong"; cooldownUntil: number; wrongCount: number; credsTaken: number }
@@ -31,9 +31,44 @@ export type SubmitOutcome =
 
 function mergeMaps(...maps: ItemMap[]): ItemMap {
   const out: ItemMap = {};
-  for (const m of maps)
-    for (const [k, v] of Object.entries(m)) out[k] = (out[k] ?? 0) + v;
+  for (const m of maps) for (const [k, v] of Object.entries(m)) out[k] = (out[k] ?? 0) + v;
   return out;
+}
+
+async function unlockStateFor(user: User, moduleSlug: string, unlockRuleJson: string, eventStartMs: number) {
+  const [inv, allModules, mySolves, myWrong] = await Promise.all([
+    getInventoryMap(user.id),
+    prisma.module.findMany({
+      where: { eventId: user.eventId },
+      select: { slug: true, puzzles: { select: { id: true } } },
+    }),
+    prisma.solve.findMany({
+      where: { userId: user.id },
+      select: { puzzle: { select: { id: true, module: { select: { slug: true } } } } },
+    }),
+    prisma.submission.findMany({
+      where: { userId: user.id, isCorrect: false },
+      select: { puzzle: { select: { module: { select: { slug: true } } } } },
+    }),
+  ]);
+  const solvedIds = new Set(mySolves.map((s) => s.puzzle.id));
+  const clearedSlugs = new Set(
+    allModules
+      .filter((m) => m.puzzles.length > 0 && m.puzzles.every((p) => solvedIds.has(p.id)))
+      .map((m) => m.slug),
+  );
+  const touchedSlugs = new Set<string>([
+    ...mySolves.map((s) => s.puzzle.module.slug),
+    ...myWrong.map((s) => s.puzzle.module.slug),
+  ]);
+  return evaluateUnlock(parseUnlockRule(unlockRuleJson), {
+    inv,
+    clearedSlugs,
+    touchedSlugs,
+    now: Date.now(),
+    eventStart: eventStartMs,
+    slug: moduleSlug,
+  });
 }
 
 export async function submitAnswer(
@@ -66,11 +101,13 @@ export async function submitAnswer(
   });
   if (existing) return { status: "already-solved" };
 
-  const need = parseJson<ItemMap>(puzzle.module.prerequisiteItemsJson, {});
-  if (Object.keys(need).length) {
-    const { ok } = holds(await getInventoryMap(user.id), need);
-    if (!ok) return { status: "locked", reason: "This room is locked." };
-  }
+  const unlock = await unlockStateFor(
+    user,
+    puzzle.module.slug,
+    puzzle.module.unlockRuleJson,
+    event.startsAt.getTime(),
+  );
+  if (!unlock.unlocked) return { status: "locked", reason: unlock.reason ?? "This room is locked." };
 
   const lastWrong = await prisma.submission.findFirst({
     where: { userId: user.id, puzzleId: puzzle.id, isCorrect: false },
@@ -108,11 +145,7 @@ export async function submitAnswer(
             actorId: user.id,
             targetType: "puzzle",
             targetId: puzzle.id,
-            meta: JSON.stringify({
-              submittedBy: user.id,
-              mintedFor: owner,
-              puzzle: puzzle.slug,
-            }),
+            meta: JSON.stringify({ submittedBy: user.id, mintedFor: owner, puzzle: puzzle.slug }),
           },
         });
       }
@@ -126,18 +159,13 @@ export async function submitAnswer(
     const wrongCount = await prisma.submission.count({
       where: { userId: user.id, puzzleId: puzzle.id, isCorrect: false },
     });
-    return {
-      status: "wrong",
-      cooldownUntil: Date.now() + puzzle.cooldownSec * 1000,
-      wrongCount,
-      credsTaken,
-    };
+    return { status: "wrong", cooldownUntil: Date.now() + puzzle.cooldownSec * 1000, wrongCount, credsTaken };
   }
 
   // correct — score it
   const solveIndex = await prisma.solve.count({ where: { puzzleId: puzzle.id } });
-  const openedAt = puzzle.module.unlockAt ?? event.startsAt;
-  const elapsedSec = Math.max(0, Math.floor((Date.now() - openedAt.getTime()) / 1000));
+  const openedAt = Math.max(event.startsAt.getTime(), unlock.opensAt ?? 0);
+  const elapsedSec = Math.max(0, Math.floor((Date.now() - openedAt) / 1000));
   const s = scoreSolve(puzzle.basePoints, solveIndex, elapsedSec);
 
   await prisma.solve.create({
@@ -151,36 +179,72 @@ export async function submitAnswer(
     },
   });
 
-  // loot: puzzle rewards + first-blood creds + (room clear reward if this finishes it)
   const puzzleRewards = parseJson<ItemMap>(puzzle.rewardsJson, {});
-  const firstBlood: ItemMap =
-    solveIndex === 0 ? { cred: SCORING.FIRST_BLOOD_CREDS } : {};
+  const firstBlood: ItemMap = solveIndex === 0 ? { cred: SCORING.FIRST_BLOOD_CREDS } : {};
 
   const solvedIds = new Set(
     (
       await prisma.solve.findMany({
-        where: {
-          userId: user.id,
-          puzzleId: { in: puzzle.module.puzzles.map((p) => p.id) },
-        },
+        where: { userId: user.id, puzzleId: { in: puzzle.module.puzzles.map((p) => p.id) } },
         select: { puzzleId: true },
       })
     ).map((r) => r.puzzleId),
   );
   const roomCleared = puzzle.module.puzzles.every((p) => solvedIds.has(p.id));
-  const clearReward = roomCleared
-    ? parseJson<ItemMap>(puzzle.module.clearRewardJson, {})
-    : {};
+  const clearReward = roomCleared ? parseJson<ItemMap>(puzzle.module.clearRewardJson, {}) : {};
 
   const rewards = mergeMaps(puzzleRewards, firstBlood, clearReward);
   if (Object.keys(rewards).length) await grantItems(user.id, rewards);
+
+  // ── feed + achievements ──
+  const roomName = puzzle.module.title.replace(/^[A-Z]\d+ · /, "");
+  if (solveIndex === 0) {
+    void emitFeed(user.eventId, "first-blood", {
+      actorId: user.id,
+      actorName: user.displayName,
+      title: `${user.displayName} drew FIRST BLOOD on ${roomName}`,
+      meta: { room: puzzle.module.slug },
+    });
+  } else {
+    void emitFeed(user.eventId, "solve", {
+      actorId: user.id,
+      actorName: user.displayName,
+      title: `${user.displayName} cracked ${roomName}`,
+      meta: { room: puzzle.module.slug },
+    });
+  }
+  if (roomCleared) {
+    void emitFeed(user.eventId, "room-clear", {
+      actorId: user.id,
+      actorName: user.displayName,
+      title: `${user.displayName} cleared ${roomName}`,
+      meta: { room: puzzle.module.slug },
+    });
+  }
+
+  let newAchievements: UnlockedAch[] = [];
+  try {
+    newAchievements = await checkAchievements(user.id, user.eventId);
+  } catch {
+    /* never block a solve on the achievement check */
+  }
+
+  const medal: Medal =
+    solveIndex <= 2 ? (["gold", "silver", "bronze"][solveIndex] as Medal) : null;
 
   return {
     status: "correct",
     base: s.base,
     bonus: s.bonus,
     solveIndex,
+    medal,
     rewards,
     roomCleared,
+    newAchievements: newAchievements.map((a) => ({
+      name: a.name,
+      icon: a.icon,
+      title: a.title,
+      credReward: a.credReward,
+    })),
   };
 }

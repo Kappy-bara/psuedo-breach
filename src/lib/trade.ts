@@ -7,6 +7,8 @@ import {
   spendItems,
   getInventoryMap,
 } from "@/lib/inventory";
+import { emitFeed } from "@/lib/feed";
+import { checkAchievements } from "@/lib/achievements";
 import type { Item, Npc } from "@prisma/client";
 
 export async function getItemCatalog(eventId: string): Promise<Map<string, Item>> {
@@ -97,8 +99,9 @@ export async function executeTrade(
   const pre = holds(await getInventoryMap(userId), give);
   if (!pre.ok) return { status: "short", missing: pre.missing };
 
+  let ok = false;
   try {
-    return await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       if (!trade.repeatable) {
         const already = await tx.tradeExecution.findFirst({ where: { userId, tradeId } });
         if (already) return { status: "done" as const };
@@ -129,8 +132,29 @@ export async function executeTrade(
 
       return { status: "ok" as const, got: get, hintRevealed };
     });
+    ok = result.status === "ok";
+    return result;
   } catch {
     const now = holds(await getInventoryMap(userId), give);
     return { status: "short", missing: now.missing };
+  } finally {
+    if (ok) {
+      const madeKeycard = Object.keys(get).some((k) => k.startsWith("keycard-"));
+      if (madeKeycard) {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { displayName: true },
+        });
+        void emitFeed(eventId, "forge", {
+          actorId: userId,
+          actorName: user?.displayName ?? "",
+          title: `${user?.displayName ?? "someone"} forged ${Object.keys(get)
+            .filter((k) => k.startsWith("keycard-"))
+            .join(", ")} at the shop`,
+          meta: { trade: trade.label },
+        });
+      }
+      void checkAchievements(userId, eventId).catch(() => {});
+    }
   }
 }

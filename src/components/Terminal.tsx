@@ -38,7 +38,7 @@ export function Terminal() {
   }
 
   return (
-    <div className="flex h-[30rem] flex-col border border-border bg-[#05070a]">
+    <div className="flex h-[30rem] flex-col border border-border bg-[#05070a] font-mono">
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto p-3 text-sm leading-relaxed">
         {lines.map((l, i) => (
           <div
@@ -47,9 +47,9 @@ export function Terminal() {
               l.tone === "in"
                 ? "text-ink-dim"
                 : l.tone === "err"
-                  ? "text-accent-red"
+                  ? "text-danger"
                   : l.tone === "sys"
-                    ? "text-accent-cyan"
+                    ? "text-accent"
                     : "whitespace-pre-wrap text-ink"
             }
           >

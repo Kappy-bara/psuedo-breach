@@ -8,7 +8,7 @@ export default async function AdminHome() {
   const events = await prisma.event.findMany({
     orderBy: { isDemo: "desc" },
     include: {
-      _count: { select: { users: true } },
+      _count: { select: { users: true, feed: true, achievements: true } },
       announcements: { orderBy: { createdAt: "desc" }, take: 10 },
       modules: {
         orderBy: { order: "asc" },
@@ -73,7 +73,7 @@ export default async function AdminHome() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="panel p-5">
-          <h2 className="kicker">// recent solves</h2>
+          <h2 className="kicker">{"// recent solves"}</h2>
           <ul className="mt-3 space-y-1 text-sm">
             {recentSolves.map((s) => (
               <li key={s.id} className="flex justify-between text-ink-dim">
@@ -91,7 +91,7 @@ export default async function AdminHome() {
         </section>
 
         <section className="border border-accent-red/30 bg-accent-red/[0.05] p-5">
-          <h2 className="kicker text-accent-red">// flag-sharing</h2>
+          <h2 className="kicker text-accent-red">{"// flag-sharing"}</h2>
           <ul className="mt-3 space-y-1 text-sm text-ink-dim">
             {anomalies.map((a) => {
               const meta = JSON.parse(a.meta || "{}");
@@ -108,7 +108,7 @@ export default async function AdminHome() {
         </section>
 
         <section className="panel p-5">
-          <h2 className="kicker">// recent trades (SUDO)</h2>
+          <h2 className="kicker">{"// recent trades"}</h2>
           <ul className="mt-3 space-y-1 text-sm text-ink-dim">
             {recentTrades.map((t) => {
               const meta = JSON.parse(t.meta || "{}");
@@ -126,7 +126,7 @@ export default async function AdminHome() {
         </section>
 
         <section className="panel p-5">
-          <h2 className="kicker">// admin actions</h2>
+          <h2 className="kicker">{"// admin actions"}</h2>
           <ul className="mt-3 space-y-1 text-sm text-ink-dim">
             {adminLog.map((a) => (
               <li key={a.id}>

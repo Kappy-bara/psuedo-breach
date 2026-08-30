@@ -37,9 +37,12 @@ export default async function InventoryPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">the satchel</h1>
-        <span className="text-lg text-accent-amber">💰 {creds} creds</span>
+      <div className="flex items-end justify-between">
+        <div>
+          <div className="kicker">{"// the satchel"}</div>
+          <h1 className="mt-1 font-display text-2xl font-bold">Inventory</h1>
+        </div>
+        <span className="hud-chip text-signal">💰 {creds} creds</span>
       </div>
 
       {groups.length === 0 && (
@@ -50,9 +53,7 @@ export default async function InventoryPage() {
 
       {groups.map((g) => (
         <section key={g.type}>
-          <div className="text-xs tracking-widest text-ink-dim">
-            {TYPE_LABEL[g.type] ?? g.type}
-          </div>
+          <div className="kicker">{TYPE_LABEL[g.type] ?? g.type}</div>
           <div className="mt-2 space-y-2">
             {g.items.map(({ entry, item }) => (
               <div key={entry.itemKey} className="panel p-3">
@@ -75,11 +76,8 @@ export default async function InventoryPage() {
         </section>
       ))}
 
-      <Link
-        href="/market"
-        className="inline-block border border-accent px-5 py-2 font-bold text-accent transition-colors hover:bg-accent hover:text-bg"
-      >
-        take it to SUDO →
+      <Link href="/market" className="btn">
+        take it to the Shop →
       </Link>
     </div>
   );

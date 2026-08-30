@@ -116,7 +116,42 @@ export async function setPuzzleHidden(formData: FormData) {
   revalidatePath("/admin");
 }
 
-/** Drop an item (or creds) into every participant's satchel in one event. */
+/** Edit a room's unlock rule (raw JSON — see src/lib/unlock.ts) and/or map position. */
+export async function setRoomUnlock(formData: FormData) {
+  const admin = await requireAdmin();
+  const id = String(formData.get("moduleId"));
+  const raw = String(formData.get("ruleJson") ?? "").trim();
+  const data: { unlockRuleJson?: string; mapX?: number; mapY?: number } = {};
+  if (raw) {
+    try {
+      JSON.parse(raw); // validate
+      data.unlockRuleJson = raw;
+    } catch {
+      return; // silently reject bad JSON
+    }
+  }
+  const mx = formData.get("mapX");
+  const my = formData.get("mapY");
+  if (mx !== null && mx !== "") data.mapX = Math.max(0, Math.min(20, Number(mx)));
+  if (my !== null && my !== "") data.mapY = Math.max(0, Math.min(20, Number(my)));
+  if (Object.keys(data).length === 0) return;
+  await prisma.module.update({ where: { id }, data });
+  await prisma.auditLog.create({
+    data: { action: "room-unlock", actorId: admin.id, targetType: "module", targetId: id, meta: JSON.stringify(data) },
+  });
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+}
+
+export async function clearFeed(formData: FormData) {
+  const admin = await requireAdmin();
+  const eventId = String(formData.get("eventId"));
+  await prisma.feedEvent.deleteMany({ where: { eventId } });
+  await logAdmin(admin.id, "feed-clear", eventId);
+  revalidatePath("/admin");
+}
+
+/** Drop an item (or creds) into every participant's inventory in one event. */
 export async function grantItemToEvent(formData: FormData) {
   const admin = await requireAdmin();
   const eventId = String(formData.get("eventId"));
@@ -154,6 +189,8 @@ export async function wipeEventProgress(formData: FormData) {
   await prisma.inventoryEntry.deleteMany({ where: w });
   await prisma.hintUnlock.deleteMany({ where: w });
   await prisma.tradeExecution.deleteMany({ where: w });
+  await prisma.achievementUnlock.deleteMany({ where: w });
+  await prisma.feedEvent.deleteMany({ where: { eventId } });
   await logAdmin(admin.id, "wipe-event-progress", eventId, { users: userIds.length });
   revalidatePath("/admin");
   revalidatePath("/dashboard");

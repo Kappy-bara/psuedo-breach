@@ -1,7 +1,8 @@
 /**
  * Wipe player progress — solves, submissions, inventory, hint unlocks, trades,
- * and the audit log. KEEPS events, rooms, puzzles, hints, items, SUDO, the user
- * accounts themselves, and announcements.
+ * achievement unlocks, the activity feed, and the audit log. KEEPS events, rooms,
+ * puzzles, hints, items, the Shop, achievement definitions, the user accounts
+ * themselves, and announcements.
  *
  * Use it to reset a leaderboard to zero (e.g. after a playtest, before go-live).
  * Runs against whatever DATABASE_URL points at.
@@ -22,12 +23,14 @@ async function main() {
   const eventSlug = arg("event");
 
   let userIds: string[] | undefined;
+  let eventId: string | undefined;
   if (eventSlug) {
     const ev = await prisma.event.findUnique({ where: { slug: eventSlug } });
     if (!ev) {
       console.error(`no event with slug "${eventSlug}"`);
       process.exit(1);
     }
+    eventId = ev.id;
     userIds = (
       await prisma.user.findMany({ where: { eventId: ev.id }, select: { id: true } })
     ).map((u) => u.id);
@@ -35,6 +38,7 @@ async function main() {
 
   const byUser = userIds ? { userId: { in: userIds } } : {};
   const byActor = userIds ? { actorId: { in: userIds } } : {};
+  const byEvent = eventId ? { eventId } : {};
 
   const wiped = {
     submissions: (await prisma.submission.deleteMany({ where: byUser })).count,
@@ -42,11 +46,15 @@ async function main() {
     inventory: (await prisma.inventoryEntry.deleteMany({ where: byUser })).count,
     hintUnlocks: (await prisma.hintUnlock.deleteMany({ where: byUser })).count,
     tradeExecutions: (await prisma.tradeExecution.deleteMany({ where: byUser })).count,
+    achievementUnlocks: (await prisma.achievementUnlock.deleteMany({ where: byUser })).count,
+    feedEvents: (await prisma.feedEvent.deleteMany({ where: byEvent })).count,
     auditLogs: (await prisma.auditLog.deleteMany({ where: byActor })).count,
   };
 
   console.log(`wiped player progress${eventSlug ? ` for "${eventSlug}"` : ""}:`, wiped);
-  console.log("kept: events, rooms, puzzles, items, SUDO, accounts, announcements");
+  console.log(
+    "kept: events, rooms, puzzles, items, the Shop, achievement definitions, accounts, announcements",
+  );
 }
 
 main()

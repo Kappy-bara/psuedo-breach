@@ -73,6 +73,6 @@ export const SCORING_EXPLAINER = `
 Wrong answers never cost points — just a short cooldown (a couple of rooms charge a small
 **cred** toll for wrong guesses; they warn you).
 
-**Creds** are separate — a wallet you fill with loot and spend at SUDO on hints, keycards and
+**Creds** are separate — a wallet you fill with loot and spend at the Shop on hints, keycards and
 trades. Spending creds **never** changes your rank.
 `.trim();

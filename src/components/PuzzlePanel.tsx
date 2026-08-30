@@ -3,13 +3,15 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Markdown } from "@/components/Markdown";
+import { useToast } from "@/components/ToastProvider";
+import { burstConfetti } from "@/lib/confetti";
 import type { PuzzleView } from "@/lib/game";
 
 const diffColor: Record<string, string> = {
-  easy: "text-accent",
-  medium: "text-accent-cyan",
-  hard: "text-accent-amber",
-  boss: "text-accent-red",
+  easy: "text-verified",
+  medium: "text-accent",
+  hard: "text-signal",
+  boss: "text-danger",
 };
 
 export function PuzzlePanel({
@@ -20,11 +22,12 @@ export function PuzzlePanel({
   moduleLocked: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(puzzle.cooldownUntil);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (!cooldownUntil) return;
@@ -56,18 +59,35 @@ export function PuzzlePanel({
         return;
       }
       switch (o.status) {
-        case "correct":
+        case "correct": {
+          const medalTxt = { gold: " · 🥇 first!", silver: " · 🥈", bronze: " · 🥉" }[
+            o.medal as string
+          ] ?? "";
           setMsg({
             kind: "ok",
-            text:
-              `CRACKED — +${o.base} base +${o.bonus} bonus` +
-              (o.solveIndex === 0 ? " · FIRST BLOOD 🩸" : "") +
-              (puzzle.rewardsLabel ? ` · loot: ${puzzle.rewardsLabel}` : "") +
-              (o.roomCleared ? " · ROOM CLEARED" : ""),
+            text: `CRACKED — +${o.base + o.bonus} pts${o.roomCleared ? " · ROOM CLEARED" : ""}`,
           });
+          toast({
+            tone: o.solveIndex === 0 ? "signal" : "ok",
+            title:
+              (o.solveIndex === 0 ? "FIRST BLOOD 🩸 " : "Cracked ✓ ") +
+              `+${o.base + o.bonus} pts${medalTxt}`,
+            body: puzzle.rewardsLabel ? `loot: ${puzzle.rewardsLabel}` : undefined,
+          });
+          for (const a of o.newAchievements ?? []) {
+            toast({
+              tone: "loot",
+              title: `${a.icon} ${a.name}`,
+              body:
+                (a.title ? `title: “${a.title}”` : "") +
+                (a.credReward ? `  ·  +${a.credReward} 💰` : ""),
+            });
+          }
+          if (o.roomCleared || (o.newAchievements ?? []).length) burstConfetti();
           setValue("");
           router.refresh();
           break;
+        }
         case "already-solved":
           setMsg({ kind: "info", text: "Already cracked." });
           router.refresh();
@@ -81,6 +101,7 @@ export function PuzzlePanel({
               `Not it. (${o.wrongCount} wrong)` +
               (o.credsTaken ? ` · toll: -${o.credsTaken} 💰` : ""),
           });
+          if (o.credsTaken) toast({ tone: "info", title: `Honeypot toll: -${o.credsTaken} 💰` });
           router.refresh();
           break;
         case "cooldown":
@@ -103,11 +124,7 @@ export function PuzzlePanel({
   }
 
   return (
-    <div
-      className={`border p-5 ${
-        puzzle.solved ? "border-accent/50 bg-accent/[0.05]" : "border-border bg-panel/60"
-      }`}
-    >
+    <div className={`panel p-5 ${puzzle.solved ? "border-verified/45 bg-verified/[0.05]" : ""}`}>
       {puzzle.leakInSource && (
         <div
           dangerouslySetInnerHTML={{
@@ -127,10 +144,10 @@ export function PuzzlePanel({
       )}
 
       <div className="flex items-center justify-between">
-        <h3 className="font-bold">{puzzle.title}</h3>
-        <span className="text-xs text-ink-dim">
-          <span className={diffColor[puzzle.difficulty] ?? "text-ink"}>{puzzle.difficulty}</span>{" "}
-          · {puzzle.basePoints} pts
+        <h3 className="font-display font-bold">{puzzle.title}</h3>
+        <span className="font-mono text-xs text-ink-dim">
+          <span className={diffColor[puzzle.difficulty] ?? "text-ink"}>{puzzle.difficulty}</span> ·{" "}
+          {puzzle.basePoints} pts
         </span>
       </div>
 
@@ -140,24 +157,24 @@ export function PuzzlePanel({
         <p className="mt-3 text-xs text-ink-dim">
           {puzzle.rewardsLabel && (
             <>
-              loot: <span className="text-accent">{puzzle.rewardsLabel}</span>
+              loot: <span className="text-verified">{puzzle.rewardsLabel}</span>
             </>
           )}
           {puzzle.wrongCostCreds > 0 && (
             <>
               {puzzle.rewardsLabel && " · "}
-              <span className="text-accent-red">
-                wrong guess costs {puzzle.wrongCostCreds} 💰
-              </span>
+              <span className="text-danger">wrong guess costs {puzzle.wrongCostCreds} 💰</span>
             </>
           )}
         </p>
       )}
 
       {puzzle.solved ? (
-        <p className="mt-4 border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-accent">
-          ✓ cracked — +{puzzle.solveInfo?.basePts} base, +{puzzle.solveInfo?.bonusPts} bonus
+        <p className="mt-4 border border-verified/40 bg-verified/10 px-3 py-2 text-sm text-verified">
+          ✓ cracked — +{(puzzle.solveInfo?.basePts ?? 0) + (puzzle.solveInfo?.bonusPts ?? 0)} pts
           {puzzle.solveInfo?.solveIndex === 0 && " · first blood"}
+          {puzzle.solveInfo?.solveIndex === 1 && " · 🥈"}
+          {puzzle.solveInfo?.solveIndex === 2 && " · 🥉"}
         </p>
       ) : (
         <form onSubmit={submit} className="mt-4 space-y-2">
@@ -167,12 +184,12 @@ export function PuzzlePanel({
               onChange={(e) => setValue(e.target.value)}
               placeholder="CMINUS{...}"
               disabled={busy || moduleLocked || cooldownLeft > 0}
-              className="flex-1 border border-border bg-panel-2 px-3 py-2 text-ink outline-none focus:border-accent disabled:opacity-50"
+              className="flex-1 border border-border bg-panel-2 px-3 py-2 font-mono text-ink outline-none focus:border-accent disabled:opacity-50"
             />
             <button
               type="submit"
               disabled={busy || moduleLocked || cooldownLeft > 0 || !value.trim()}
-              className="border border-accent bg-accent/10 px-4 font-bold text-accent transition-colors hover:bg-accent hover:text-bg disabled:opacity-40"
+              className="btn px-4"
             >
               {cooldownLeft > 0 ? `${cooldownLeft}s` : busy ? "…" : "submit"}
             </button>
@@ -181,9 +198,9 @@ export function PuzzlePanel({
             <p
               className={`px-3 py-2 text-sm ${
                 msg.kind === "ok"
-                  ? "border border-accent/40 bg-accent/10 text-accent"
+                  ? "border border-verified/40 bg-verified/10 text-verified"
                   : msg.kind === "err"
-                    ? "border border-accent-red/40 bg-accent-red/10 text-accent-red"
+                    ? "border border-danger/40 bg-danger/10 text-danger"
                     : "border border-border bg-panel-2 text-ink-dim"
               }`}
             >

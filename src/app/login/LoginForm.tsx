@@ -11,30 +11,30 @@ export function LoginForm() {
   return (
     <form action={action} className="space-y-4">
       <label className="block">
-        <span className="text-xs tracking-widest text-ink-dim">REGISTER ID</span>
+        <span className="kicker">register id</span>
         <input
           name="registerId"
           autoComplete="username"
           autoCapitalize="characters"
           required
-          className="mt-1 w-full border border-border bg-panel-2 px-3 py-2 text-ink outline-none focus:border-accent"
+          className="mt-1 w-full border border-border bg-panel-2 px-3 py-2 font-mono text-ink outline-none focus:border-accent"
           placeholder="PB-XXXX-00"
         />
       </label>
       <label className="block">
-        <span className="text-xs tracking-widest text-ink-dim">PASSWORD</span>
+        <span className="kicker">password</span>
         <input
           name="password"
           type="password"
           autoComplete="current-password"
           required
-          className="mt-1 w-full border border-border bg-panel-2 px-3 py-2 text-ink outline-none focus:border-accent"
+          className="mt-1 w-full border border-border bg-panel-2 px-3 py-2 font-mono text-ink outline-none focus:border-accent"
           placeholder="••••••••"
         />
       </label>
 
       {state.error && (
-        <p className="border border-accent-red/40 bg-accent-red/10 px-3 py-2 text-sm text-accent-red">
+        <p className="border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
           {state.error}
         </p>
       )}

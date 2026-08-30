@@ -7,16 +7,14 @@ import { TradeList, type ItemInfo } from "@/components/TradeList";
 export default async function MarketPage() {
   const user = await requireUser();
   const [data, creds] = await Promise.all([
-    listTrades(user.id, user.eventId, "sudo"),
+    listTrades(user.id, user.eventId, "shop"),
     getCreds(user.id),
   ]);
 
   if (!data) {
     return (
       <div className="mx-auto max-w-2xl">
-        <p className="border border-border bg-panel/60 p-4 text-sm text-ink-dim">
-          No vendor in this event.
-        </p>
+        <p className="panel p-4 text-sm text-ink-dim">No Shop in this event.</p>
       </div>
     );
   }
@@ -27,12 +25,15 @@ export default async function MarketPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div className="border border-accent-cyan/30 bg-accent-cyan/[0.05] p-5">
+      <div className="panel p-5">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight">
-            {data.npc.icon} {data.npc.name}
-          </h1>
-          <span className="text-accent-amber">💰 {creds}</span>
+          <div>
+            <div className="kicker">{"// requisitions"}</div>
+            <h1 className="mt-1 font-display text-2xl font-bold">
+              {data.npc.icon} {data.npc.name}
+            </h1>
+          </div>
+          <span className="hud-chip text-signal">💰 {creds}</span>
         </div>
         {data.npc.blurbMd && (
           <Markdown className="mt-2 text-sm text-ink-dim">{data.npc.blurbMd}</Markdown>
