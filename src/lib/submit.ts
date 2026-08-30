@@ -1,19 +1,40 @@
 import { prisma } from "@/lib/db";
 import { validateSubmission } from "@/lib/validators";
-import { scoreSolve } from "@/lib/scoring";
+import { scoreSolve, SCORING } from "@/lib/scoring";
 import { whichUserMintedFlag } from "@/lib/flags";
 import { parseJson } from "@/lib/json";
-import { eventPhase, grantToken, userTokenKeys } from "@/lib/game";
+import { eventPhase } from "@/lib/game";
+import {
+  type ItemMap,
+  holds,
+  grantItems,
+  getInventoryMap,
+  spendCredsFloor,
+} from "@/lib/inventory";
 import type { User } from "@prisma/client";
 
 export type SubmitOutcome =
-  | { status: "correct"; base: number; bonus: number; solveIndex: number; tokenGranted: string | null }
+  | {
+      status: "correct";
+      base: number;
+      bonus: number;
+      solveIndex: number;
+      rewards: ItemMap; // loot from the puzzle + room-clear + first blood, merged
+      roomCleared: boolean;
+    }
   | { status: "already-solved" }
-  | { status: "wrong"; cooldownUntil: number; wrongCount: number }
+  | { status: "wrong"; cooldownUntil: number; wrongCount: number; credsTaken: number }
   | { status: "cooldown"; cooldownUntil: number }
   | { status: "locked"; reason: string }
   | { status: "closed"; reason: string }
   | { status: "not-found" };
+
+function mergeMaps(...maps: ItemMap[]): ItemMap {
+  const out: ItemMap = {};
+  for (const m of maps)
+    for (const [k, v] of Object.entries(m)) out[k] = (out[k] ?? 0) + v;
+  return out;
+}
 
 export async function submitAnswer(
   user: User,
@@ -25,7 +46,7 @@ export async function submitAnswer(
 
   const puzzle = await prisma.puzzle.findUnique({
     where: { slug: puzzleSlug },
-    include: { module: { include: { event: true } } },
+    include: { module: { include: { event: true, puzzles: { select: { id: true } } } } },
   });
   if (!puzzle || puzzle.isHidden || puzzle.module.eventId !== user.eventId)
     return { status: "not-found" };
@@ -34,23 +55,23 @@ export async function submitAnswer(
   if (eventPhase(event) !== "open")
     return {
       status: "closed",
-      reason: eventPhase(event) === "ended" ? "The event has ended." : "The event hasn't started yet.",
+      reason:
+        eventPhase(event) === "ended"
+          ? "The event has ended."
+          : "The event hasn't started yet.",
     };
-
-  // module prerequisite tokens
-  const prereqs = parseJson<string[]>(puzzle.module.prerequisiteTokenKeys, []);
-  if (prereqs.length) {
-    const tokens = await userTokenKeys(user.id);
-    const missing = prereqs.filter((k) => !tokens.has(k));
-    if (missing.length) return { status: "locked", reason: `Locked — needs: ${missing.join(", ")}` };
-  }
 
   const existing = await prisma.solve.findUnique({
     where: { userId_puzzleId: { userId: user.id, puzzleId: puzzle.id } },
   });
   if (existing) return { status: "already-solved" };
 
-  // cooldown from the most recent wrong answer
+  const need = parseJson<ItemMap>(puzzle.module.prerequisiteItemsJson, {});
+  if (Object.keys(need).length) {
+    const { ok } = holds(await getInventoryMap(user.id), need);
+    if (!ok) return { status: "locked", reason: "This room is locked." };
+  }
+
   const lastWrong = await prisma.submission.findFirst({
     where: { userId: user.id, puzzleId: puzzle.id, isCorrect: false },
     orderBy: { createdAt: "desc" },
@@ -74,7 +95,6 @@ export async function submitAnswer(
   });
 
   if (!correct) {
-    // sharing detection: was this a *valid* per-user flag minted for someone else?
     if (puzzle.perUserFlag && /^CMINUS\{[A-Z2-7]{16}\}$/.test(value.trim())) {
       const others = await prisma.user.findMany({
         where: { eventId: user.eventId, id: { not: user.id } },
@@ -88,11 +108,21 @@ export async function submitAnswer(
             actorId: user.id,
             targetType: "puzzle",
             targetId: puzzle.id,
-            meta: JSON.stringify({ submittedBy: user.id, mintedFor: owner, puzzle: puzzle.slug }),
+            meta: JSON.stringify({
+              submittedBy: user.id,
+              mintedFor: owner,
+              puzzle: puzzle.slug,
+            }),
           },
         });
       }
     }
+
+    const cfg = parseJson<{ wrongCostCreds?: number }>(puzzle.validatorConfig, {});
+    const credsTaken = cfg.wrongCostCreds
+      ? await spendCredsFloor(user.id, cfg.wrongCostCreds)
+      : 0;
+
     const wrongCount = await prisma.submission.count({
       where: { userId: user.id, puzzleId: puzzle.id, isCorrect: false },
     });
@@ -100,10 +130,11 @@ export async function submitAnswer(
       status: "wrong",
       cooldownUntil: Date.now() + puzzle.cooldownSec * 1000,
       wrongCount,
+      credsTaken,
     };
   }
 
-  // correct — compute score
+  // correct — score it
   const solveIndex = await prisma.solve.count({ where: { puzzleId: puzzle.id } });
   const openedAt = puzzle.module.unlockAt ?? event.startsAt;
   const elapsedSec = Math.max(0, Math.floor((Date.now() - openedAt.getTime()) / 1000));
@@ -120,17 +151,36 @@ export async function submitAnswer(
     },
   });
 
-  let tokenGranted: string | null = null;
-  if (puzzle.grantsTokenKey) {
-    await grantToken(user.id, puzzle.grantsTokenKey, puzzle.id);
-    tokenGranted = puzzle.grantsTokenKey;
-  }
+  // loot: puzzle rewards + first-blood creds + (room clear reward if this finishes it)
+  const puzzleRewards = parseJson<ItemMap>(puzzle.rewardsJson, {});
+  const firstBlood: ItemMap =
+    solveIndex === 0 ? { cred: SCORING.FIRST_BLOOD_CREDS } : {};
+
+  const solvedIds = new Set(
+    (
+      await prisma.solve.findMany({
+        where: {
+          userId: user.id,
+          puzzleId: { in: puzzle.module.puzzles.map((p) => p.id) },
+        },
+        select: { puzzleId: true },
+      })
+    ).map((r) => r.puzzleId),
+  );
+  const roomCleared = puzzle.module.puzzles.every((p) => solvedIds.has(p.id));
+  const clearReward = roomCleared
+    ? parseJson<ItemMap>(puzzle.module.clearRewardJson, {})
+    : {};
+
+  const rewards = mergeMaps(puzzleRewards, firstBlood, clearReward);
+  if (Object.keys(rewards).length) await grantItems(user.id, rewards);
 
   return {
     status: "correct",
     base: s.base,
     bonus: s.bonus,
     solveIndex,
-    tokenGranted,
+    rewards,
+    roomCleared,
   };
 }

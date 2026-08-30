@@ -2,7 +2,8 @@ import { z } from "zod";
 import { json, withUser, limitOr429, rateLimiters } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { parseJson } from "@/lib/json";
-import { getUserScore, grantToken, userTokenKeys, type HintUnlockRule } from "@/lib/game";
+import { type HintUnlockRule } from "@/lib/game";
+import { getInventoryMap, spendItems, InventoryError, CRED } from "@/lib/inventory";
 
 const Body = z.object({ hintId: z.string().min(1).max(60) });
 
@@ -23,20 +24,19 @@ export const POST = withUser(async (user, req) => {
   const existing = await prisma.hintUnlock.findUnique({
     where: { userId_hintId: { userId: user.id, hintId: hint.id } },
   });
-  if (existing)
-    return json({ unlocked: true, contentMd: hint.contentMd, grantsTokenKey: hint.grantsTokenKey });
+  if (existing) return json({ unlocked: true, contentMd: hint.contentMd });
 
   const rule = parseJson<HintUnlockRule>(hint.unlockRule, { kind: "free" });
-  let costPaid = 0;
 
-  if (rule.kind === "terminal") {
-    return json({ error: "This hint is reached from the terminal (knock)." }, 403);
+  if (rule.kind === "npc")
+    return json({ error: "SUDO has this one. Go trade." }, 403);
+
+  if (rule.kind === "item") {
+    const inv = await getInventoryMap(user.id);
+    if ((inv[rule.key] ?? 0) <= 0)
+      return json({ error: `Locked — you need the ${rule.key}.` }, 403);
   }
-  if (rule.kind === "token") {
-    const tokens = await userTokenKeys(user.id);
-    if (!tokens.has(rule.key))
-      return json({ error: `Locked — needs the "${rule.key}" token.` }, 403);
-  }
+
   if (rule.kind === "auto-after-wrong") {
     if (!hint.puzzleId) return json({ error: "misconfigured hint" }, 500);
     const wrong = await prisma.submission.count({
@@ -45,22 +45,28 @@ export const POST = withUser(async (user, req) => {
     if (wrong < rule.n)
       return json({ error: `Unlocks after ${rule.n} wrong answers (you have ${wrong}).` }, 403);
   }
-  if (rule.kind === "paid") {
-    costPaid = hint.cost;
-    const score = await getUserScore(user.id);
-    if (score < costPaid)
-      return json({ error: `Costs ${costPaid} points — you have ${score}.` }, 403);
+
+  let costPaid = 0;
+  if (rule.kind === "buy") {
+    try {
+      await prisma.$transaction(async (tx) => {
+        await spendItems(user.id, { [CRED]: rule.cost }, tx);
+        await tx.hintUnlock.create({
+          data: { userId: user.id, hintId: hint.id, costPaid: rule.cost },
+        });
+      });
+      costPaid = rule.cost;
+    } catch (e) {
+      if (e instanceof InventoryError)
+        return json({ error: `That costs ${rule.cost} 💰 and you're short.` }, 403);
+      throw e;
+    }
+    return json({ unlocked: true, contentMd: hint.contentMd, costPaid });
   }
 
+  // free / item / auto — qualified: record and return
   await prisma.hintUnlock.create({
     data: { userId: user.id, hintId: hint.id, costPaid },
   });
-  if (hint.grantsTokenKey) await grantToken(user.id, hint.grantsTokenKey);
-
-  return json({
-    unlocked: true,
-    contentMd: hint.contentMd,
-    grantsTokenKey: hint.grantsTokenKey,
-    costPaid,
-  });
+  return json({ unlocked: true, contentMd: hint.contentMd });
 });

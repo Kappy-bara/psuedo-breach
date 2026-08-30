@@ -9,16 +9,24 @@ export default async function LoginPage() {
   return (
     <div className="flex flex-1 items-center justify-center px-4 py-16">
       <div className="w-full max-w-sm">
-        <Link href="/" className="text-xs tracking-[0.3em] text-ink-dim hover:text-ink">
-          ← PSEUDO·BREACH
+        <Link
+          href="/"
+          className="kicker transition-colors hover:text-ink"
+        >
+          ← pseudo/breach
         </Link>
-        <h1 className="mt-4 text-2xl font-bold">Identify yourself</h1>
+        <h1 className="mt-4 text-2xl font-bold">
+          <span className="cursor-blink">Identify yourself</span>
+        </h1>
         <p className="mt-1 text-sm text-ink-dim">
-          Use the register ID and password the organisers gave you.
+          Register ID and password, both handed to you by the organisers.
         </p>
-        <div className="mt-6 border border-border bg-panel/60 p-6">
+        <div className="panel mt-6 p-6">
           <LoginForm />
         </div>
+        <p className="mt-4 text-xs text-ink-faint">
+          Forgot it? Find an organiser — they can reset it.
+        </p>
       </div>
     </div>
   );

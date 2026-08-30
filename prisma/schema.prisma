@@ -1,4 +1,4 @@
-// PSEUDO-BREACH — data model
+// PSEUDO-BREACH — data model (v2: the hacking dungeon)
 //
 // Local dev uses SQLite (zero setup). Production on Vercel uses Postgres (Neon).
 // To switch to Postgres: change `provider` below to "postgresql" and set DATABASE_URL
@@ -30,6 +30,8 @@ model Event {
   users         User[]
   modules       Module[]
   announcements Announcement[]
+  items         Item[]
+  npcs          Npc[]
 }
 
 model User {
@@ -49,24 +51,25 @@ model User {
   submissions Submission[]
   solves      Solve[]
   hintUnlocks HintUnlock[]
-  tokenGrants TokenGrant[]
-  playerKV    PlayerKV[]
-  auditLogs   AuditLog[]   @relation("AuditActor")
+  inventory   InventoryEntry[]
+  auditLogs   AuditLog[]       @relation("AuditActor")
 
   @@index([eventId, registerId])
 }
 
 model Module {
-  id                    String   @id @default(cuid())
-  slug                  String
-  title                 String
-  blurb                 String   @default("")
-  order                 Int      @default(0)
-  theme                 String   @default("default")
-  unlockAt              DateTime? // null = follows event start
-  isHidden              Boolean  @default(false)
-  // JSON string: array of token keys the player must hold to open this module. "[]" = none.
-  prerequisiteTokenKeys String   @default("[]")
+  id       String    @id @default(cuid())
+  slug     String
+  title    String
+  blurb    String    @default("")
+  order    Int       @default(0)
+  theme    String    @default("default")
+  unlockAt DateTime? // null = follows event start
+  isHidden Boolean   @default(false)
+  // JSON string: { itemKey: qty } the player must HOLD to enter. "{}" = open.
+  prerequisiteItemsJson String @default("{}")
+  // JSON string: { itemKey: qty } granted when every puzzle in the room is solved.
+  clearRewardJson       String @default("{}")
 
   eventId String
   event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
@@ -79,26 +82,27 @@ model Module {
 }
 
 model Puzzle {
-  id          String  @id @default(cuid())
-  slug        String  @unique
-  title       String
-  promptMd    String
+  id         String @id @default(cuid())
+  slug       String @unique
+  title      String
+  promptMd   String
   // static | regex | numeric | cminus-output
-  type        String  @default("static")
-  basePoints  Int     @default(100)
-  difficulty  String  @default("easy") // easy | medium | hard | boss
-  order       Int     @default(0)
+  type       String @default("static")
+  basePoints Int    @default(100)
+  difficulty String @default("easy") // easy | medium | hard | boss
+  order      Int    @default(0)
   // JSON string. Shape depends on type — see src/lib/validators.ts
   //   static:  { "answer": "..."} or { "perUser": true }  (perUser => HMAC flag)
   //   regex:   { "pattern": "^FLAG\\{.*\\}$", "flags": "i" }
   //   numeric: { "value": 42, "tolerance": 0 }
   //   cminus-output: { "expectedStdout": "..." }
-  validatorConfig String @default("{}")
+  //   optional on any: { "leakInSource": true }, { "domFlagB64": "..." }, { "wrongCostCreds": 5 }
+  validatorConfig String  @default("{}")
   perUserFlag     Boolean @default(false)
   cooldownSec     Int     @default(15)
   isHidden        Boolean @default(false)
-  // solving this puzzle grants this token key to the player (cross-module unlocks)
-  grantsTokenKey  String?
+  // JSON string: { itemKey: qty } granted to the player on solve (loot).
+  rewardsJson     String  @default("{}")
 
   moduleId String
   module   Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
@@ -106,24 +110,21 @@ model Puzzle {
   submissions Submission[]
   solves      Solve[]
   hints       Hint[]
-  tokenGrants TokenGrant[]
 
   @@index([moduleId, order])
 }
 
 model Hint {
-  id        String  @id @default(cuid())
+  id        String @id @default(cuid())
   contentMd String
-  order     Int     @default(0)
-  cost      Int     @default(0) // points deducted on unlock; 0 = free
+  order     Int    @default(0)
   // JSON string, one of:
   //   { "kind": "free" }
   //   { "kind": "auto-after-wrong", "n": 3 }
-  //   { "kind": "token", "key": "ghost-key" }
-  //   { "kind": "terminal" }            (granted via c- knock())
-  //   { "kind": "paid" }                (must spend `cost`)
-  unlockRule     String  @default("{\"kind\":\"free\"}")
-  grantsTokenKey String? // unlocking this hint grants this token to the player
+  //   { "kind": "item", "key": "keycard-red" }   (hold this item)
+  //   { "kind": "buy", "cost": 30 }              (inline "buy for N creds")
+  //   { "kind": "npc" }                          (only via an NpcTrade with revealsHintId)
+  unlockRule String @default("{\"kind\":\"free\"}")
 
   moduleId String
   module   Module  @relation(fields: [moduleId], references: [id], onDelete: Cascade)
@@ -141,7 +142,7 @@ model HintUnlock {
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   hintId     String
   hint       Hint     @relation(fields: [hintId], references: [id], onDelete: Cascade)
-  costPaid   Int      @default(0)
+  costPaid   Int      @default(0) // creds spent, if bought
   unlockedAt DateTime @default(now())
 
   @@unique([userId, hintId])
@@ -178,28 +179,81 @@ model Solve {
   @@index([puzzleId, solveIndex])
 }
 
-model TokenGrant {
-  id            String   @id @default(cuid())
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  key           String
-  sourcePuzzleId String?
-  sourcePuzzle   Puzzle? @relation(fields: [sourcePuzzleId], references: [id], onDelete: SetNull)
-  grantedAt     DateTime @default(now())
+// ── inventory / economy ──────────────────────────────────────────────────────
 
-  @@unique([userId, key])
+model Item {
+  id            String  @id @default(cuid())
+  key           String // "cred" | "keycard-red" | "frag-alpha" | "loot-old-badge" | ...
+  name          String
+  descriptionMd String  @default("")
+  type          String // cred | fragment | keycard | loot | trophy
+  icon          String  @default("📦")
+  stackable     Boolean @default(false)
+  sellValue     Int     @default(0) // creds SUDO pays on buy-back (0 = not sellable)
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, key])
+}
+
+model InventoryEntry {
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemKey  String
+  quantity Int    @default(0)
+
+  @@unique([userId, itemKey])
   @@index([userId])
 }
 
-model PlayerKV {
-  id     String @id @default(cuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  key    String
-  value  String
+model Npc {
+  id      String @id @default(cuid())
+  slug    String // "sudo"
+  name    String
+  blurbMd String @default("")
+  icon    String @default("🤖")
 
-  @@unique([userId, key])
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  trades NpcTrade[]
+
+  @@unique([eventId, slug])
 }
+
+model NpcTrade {
+  id                   String  @id @default(cuid())
+  order                Int     @default(0)
+  label                String
+  descriptionMd        String  @default("")
+  giveJson        String  @default("{}") // { itemKey: qty } consumed
+  getItemsJson    String  @default("{}") // { itemKey: qty } granted (a keycard-master here = "vault opened")
+  revealsHintId   String? // executing this trade also reveals this hint
+  repeatable      Boolean @default(false)
+  showIfHoldsJson String  @default("{}") // { itemKey: qty } required to SEE the trade
+  isHidden        Boolean @default(false)
+
+  npcId String
+  npc   Npc    @relation(fields: [npcId], references: [id], onDelete: Cascade)
+
+  executions TradeExecution[]
+
+  @@index([npcId, order])
+}
+
+model TradeExecution {
+  id        String   @id @default(cuid())
+  userId    String
+  tradeId   String
+  trade     NpcTrade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId, tradeId])
+}
+
+// ── misc ─────────────────────────────────────────────────────────────────────
 
 model Announcement {
   id        String   @id @default(cuid())

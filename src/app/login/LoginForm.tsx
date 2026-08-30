@@ -39,12 +39,8 @@ export function LoginForm() {
         </p>
       )}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="w-full border border-accent bg-accent/10 px-4 py-2.5 font-bold text-accent hover:bg-accent hover:text-bg disabled:opacity-50 transition-colors"
-      >
-        {pending ? "authenticating…" : "[ log in ]"}
+      <button type="submit" disabled={pending} className="btn w-full">
+        {pending ? "authenticating…" : "[ jack in ]"}
       </button>
     </form>
   );

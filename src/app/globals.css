@@ -1,20 +1,23 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #07090c;
-  --color-panel: #0d1117;
-  --color-panel-2: #11161d;
-  --color-border: #1e2630;
-  --color-ink: #d7e0ea;
-  --color-ink-dim: #8b97a5;
+  --color-bg: #06080b;
+  --color-bg-2: #0a0d12;
+  --color-panel: #0d1219;
+  --color-panel-2: #121822;
+  --color-border: #1c2632;
+  --color-border-bright: #2b3a4a;
+  --color-ink: #dbe4ee;
+  --color-ink-dim: #8593a4;
+  --color-ink-faint: #566374;
   --color-accent: #4ade80;
   --color-accent-cyan: #38bdf8;
   --color-accent-amber: #fbbf24;
   --color-accent-magenta: #e879f9;
-  --color-accent-red: #f87171;
+  --color-accent-red: #fb7185;
 
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo,
-    Consolas, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas,
+    monospace;
   --font-sans: var(--font-mono);
 }
 
@@ -28,26 +31,42 @@ html {
 
 body {
   background:
-    radial-gradient(1200px 600px at 80% -10%, rgba(56, 189, 248, 0.06), transparent),
-    radial-gradient(900px 500px at 0% 100%, rgba(74, 222, 128, 0.05), transparent),
-    var(--color-bg);
+    radial-gradient(1100px 520px at 82% -8%, rgba(56, 189, 248, 0.07), transparent 70%),
+    radial-gradient(900px 480px at -5% 105%, rgba(74, 222, 128, 0.06), transparent 70%),
+    linear-gradient(180deg, var(--color-bg-2), var(--color-bg));
   color: var(--color-ink);
   font-family: var(--font-mono);
   letter-spacing: 0.01em;
 }
 
+/* faint blueprint grid */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(90, 120, 150, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(90, 120, 150, 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 30%, transparent 90%);
+}
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
 a {
   color: inherit;
 }
-
 ::selection {
   background: rgba(74, 222, 128, 0.28);
 }
 
-/* thin scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-border) transparent;
+  scrollbar-color: var(--color-border-bright) transparent;
 }
 
 .scanlines::before {
@@ -55,17 +74,82 @@ a {
   position: fixed;
   inset: 0;
   pointer-events: none;
+  z-index: 60;
   background: repeating-linear-gradient(
     to bottom,
-    rgba(255, 255, 255, 0.015) 0px,
-    rgba(255, 255, 255, 0.015) 1px,
+    rgba(255, 255, 255, 0.012) 0px,
+    rgba(255, 255, 255, 0.012) 1px,
     transparent 1px,
     transparent 3px
   );
-  z-index: 50;
 }
 
-/* markdown */
+/* ── reusable surfaces ─────────────────────────────────────────────── */
+
+.panel {
+  border: 1px solid var(--color-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 40%),
+    var(--color-panel);
+}
+.panel-hover {
+  transition:
+    border-color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.panel-hover:hover {
+  border-color: var(--color-border-bright);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px -12px rgba(0, 0, 0, 0.6);
+}
+
+.hud-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel-2);
+  padding: 0.15rem 0.55rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.kicker {
+  font-size: 0.7rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  padding: 0.5rem 1.1rem;
+  font-weight: 700;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease,
+    transform 0.06s ease;
+}
+.btn:hover {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ── markdown ──────────────────────────────────────────────────────── */
+
 .prose-term :where(p, ul, ol, pre, blockquote, h1, h2, h3, table) {
   margin: 0.7em 0;
 }
@@ -73,20 +157,24 @@ a {
   font-weight: 700;
   color: var(--color-ink);
 }
-.prose-term h1 { font-size: 1.25rem; }
-.prose-term h2 { font-size: 1.1rem; }
+.prose-term h1 {
+  font-size: 1.2rem;
+}
+.prose-term h2 {
+  font-size: 1.05rem;
+}
 .prose-term code {
   background: var(--color-panel-2);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: 3px;
   padding: 0.05em 0.35em;
   font-size: 0.9em;
 }
 .prose-term pre {
-  background: #05070a;
+  background: #04060a;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 0.9rem 1rem;
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
   overflow-x: auto;
 }
 .prose-term pre code {
@@ -97,19 +185,65 @@ a {
 .prose-term a {
   color: var(--color-accent-cyan);
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
-.prose-term ul { list-style: disc; padding-left: 1.3rem; }
-.prose-term ol { list-style: decimal; padding-left: 1.3rem; }
-.prose-term table { border-collapse: collapse; }
-.prose-term th, .prose-term td {
+.prose-term blockquote {
+  border-left: 2px solid var(--color-border-bright);
+  padding-left: 0.9rem;
+  color: var(--color-ink-dim);
+}
+.prose-term ul {
+  list-style: disc;
+  padding-left: 1.3rem;
+}
+.prose-term ol {
+  list-style: decimal;
+  padding-left: 1.3rem;
+}
+.prose-term table {
+  border-collapse: collapse;
+  font-size: 0.9em;
+  display: block;
+  overflow-x: auto;
+}
+.prose-term th,
+.prose-term td {
   border: 1px solid var(--color-border);
   padding: 0.35rem 0.6rem;
+  text-align: left;
+}
+.prose-term th {
+  background: var(--color-panel-2);
+  color: var(--color-ink-dim);
 }
 
-@keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
 .cursor-blink::after {
   content: "▋";
   margin-left: 2px;
   animation: blink 1s step-end infinite;
   color: var(--color-accent);
+}
+
+@keyframes flash-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.flash-in {
+  animation: flash-in 0.22s ease both;
 }

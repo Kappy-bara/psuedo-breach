@@ -12,12 +12,12 @@ export default async function LeaderboardPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">leaderboard</h1>
-      <div className="border border-border bg-panel/60 p-5">
+      <div className="panel p-5">
         <LeaderboardLive
           initial={{ rows: rows.slice(0, 100), you, total: rows.length }}
         />
       </div>
-      <details className="border border-border bg-panel/60 p-4 text-sm text-ink-dim">
+      <details className="panel p-4 text-sm text-ink-dim">
         <summary className="cursor-pointer text-ink">how scoring works</summary>
         <Markdown className="mt-3">{SCORING_EXPLAINER}</Markdown>
       </details>

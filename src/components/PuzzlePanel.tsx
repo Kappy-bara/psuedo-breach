@@ -12,7 +12,13 @@ const diffColor: Record<string, string> = {
   boss: "text-accent-red",
 };
 
-export function PuzzlePanel({ puzzle, moduleLocked }: { puzzle: PuzzleView; moduleLocked: boolean }) {
+export function PuzzlePanel({
+  puzzle,
+  moduleLocked,
+}: {
+  puzzle: PuzzleView;
+  moduleLocked: boolean;
+}) {
   const router = useRouter();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,21 +59,28 @@ export function PuzzlePanel({ puzzle, moduleLocked }: { puzzle: PuzzleView; modu
         case "correct":
           setMsg({
             kind: "ok",
-            text: `SOLVED — +${o.base} base +${o.bonus} bonus${
-              o.tokenGranted ? ` · token "${o.tokenGranted}" granted` : ""
-            }${o.solveIndex === 0 ? " · FIRST BLOOD 🩸" : ""}`,
+            text:
+              `CRACKED — +${o.base} base +${o.bonus} bonus` +
+              (o.solveIndex === 0 ? " · FIRST BLOOD 🩸" : "") +
+              (puzzle.rewardsLabel ? ` · loot: ${puzzle.rewardsLabel}` : "") +
+              (o.roomCleared ? " · ROOM CLEARED" : ""),
           });
           setValue("");
           router.refresh();
           break;
         case "already-solved":
-          setMsg({ kind: "info", text: "You already solved this one." });
+          setMsg({ kind: "info", text: "Already cracked." });
           router.refresh();
           break;
         case "wrong":
           setCooldownUntil(o.cooldownUntil);
           setNow(Date.now());
-          setMsg({ kind: "err", text: `Not it. (${o.wrongCount} wrong so far)` });
+          setMsg({
+            kind: "err",
+            text:
+              `Not it. (${o.wrongCount} wrong)` +
+              (o.credsTaken ? ` · toll: -${o.credsTaken} 💰` : ""),
+          });
           router.refresh();
           break;
         case "cooldown":
@@ -76,13 +89,11 @@ export function PuzzlePanel({ puzzle, moduleLocked }: { puzzle: PuzzleView; modu
           setMsg({ kind: "err", text: "Cooldown still active." });
           break;
         case "locked":
-          setMsg({ kind: "err", text: o.reason });
-          break;
         case "closed":
           setMsg({ kind: "err", text: o.reason });
           break;
         default:
-          setMsg({ kind: "err", text: "Puzzle not found." });
+          setMsg({ kind: "err", text: "Not found." });
       }
     } catch {
       setMsg({ kind: "err", text: "Network error." });
@@ -97,11 +108,10 @@ export function PuzzlePanel({ puzzle, moduleLocked }: { puzzle: PuzzleView; modu
         puzzle.solved ? "border-accent/50 bg-accent/[0.05]" : "border-border bg-panel/60"
       }`}
     >
-      {/* hidden flag for View-Source puzzles */}
       {puzzle.leakInSource && (
         <div
           dangerouslySetInnerHTML={{
-            __html: `<!-- do not ship comments like this. flag: ${puzzle.leakInSource} -->`,
+            __html: `<!-- reminder: strip debug comments before shipping. flag=${puzzle.leakInSource} -->`,
           }}
         />
       )}
@@ -110,7 +120,7 @@ export function PuzzlePanel({ puzzle, moduleLocked }: { puzzle: PuzzleView; modu
           <div hidden data-vault={puzzle.domFlagB64} />
           <script
             dangerouslySetInnerHTML={{
-              __html: `/* client-side gate, very secure */ var user={isAdmin:false}; if(user.isAdmin){/* would reveal it here */}`,
+              __html: `/* client-side gate, totally secure */ var user={isAdmin:false}; if(user.isAdmin){/* would show it here */}`,
             }}
           />
         </>
@@ -126,9 +136,27 @@ export function PuzzlePanel({ puzzle, moduleLocked }: { puzzle: PuzzleView; modu
 
       <Markdown className="mt-3">{puzzle.promptMd}</Markdown>
 
+      {(puzzle.rewardsLabel || puzzle.wrongCostCreds > 0) && !puzzle.solved && (
+        <p className="mt-3 text-xs text-ink-dim">
+          {puzzle.rewardsLabel && (
+            <>
+              loot: <span className="text-accent">{puzzle.rewardsLabel}</span>
+            </>
+          )}
+          {puzzle.wrongCostCreds > 0 && (
+            <>
+              {puzzle.rewardsLabel && " · "}
+              <span className="text-accent-red">
+                wrong guess costs {puzzle.wrongCostCreds} 💰
+              </span>
+            </>
+          )}
+        </p>
+      )}
+
       {puzzle.solved ? (
         <p className="mt-4 border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-accent">
-          ✓ solved — +{puzzle.solveInfo?.basePts} base, +{puzzle.solveInfo?.bonusPts} bonus
+          ✓ cracked — +{puzzle.solveInfo?.basePts} base, +{puzzle.solveInfo?.bonusPts} bonus
           {puzzle.solveInfo?.solveIndex === 0 && " · first blood"}
         </p>
       ) : (
@@ -137,16 +165,14 @@ export function PuzzlePanel({ puzzle, moduleLocked }: { puzzle: PuzzleView; modu
             <input
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              placeholder={
-                puzzle.type === "cminus-output" ? "paste your program's output" : "CMINUS{...}"
-              }
+              placeholder="CMINUS{...}"
               disabled={busy || moduleLocked || cooldownLeft > 0}
               className="flex-1 border border-border bg-panel-2 px-3 py-2 text-ink outline-none focus:border-accent disabled:opacity-50"
             />
             <button
               type="submit"
               disabled={busy || moduleLocked || cooldownLeft > 0 || !value.trim()}
-              className="border border-accent bg-accent/10 px-4 font-bold text-accent hover:bg-accent hover:text-bg disabled:opacity-40 transition-colors"
+              className="border border-accent bg-accent/10 px-4 font-bold text-accent transition-colors hover:bg-accent hover:text-bg disabled:opacity-40"
             >
               {cooldownLeft > 0 ? `${cooldownLeft}s` : busy ? "…" : "submit"}
             </button>

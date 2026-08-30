@@ -1,11 +1,11 @@
 /**
  * Scoring — pure and deterministic so it can be unit-tested and explained to
- * participants. Total score for a player is:
+ * participants. Leaderboard score for a player is:
  *
- *   Σ (base + bonus)  over solves   −   Σ (hint cost)  over unlocked hints
+ *   Σ (base + rank bonus + speed bonus)  over solves
  *
- * There is NO negative penalty for wrong answers; a wrong answer costs only a
- * short cooldown (see Puzzle.cooldownSec).
+ * That's it. Wrong answers cost only a short cooldown. Creds (the spending
+ * currency) and hint purchases live in the economy and never touch the score.
  */
 
 export const SCORING = {
@@ -17,6 +17,8 @@ export const SCORING = {
   /** speed bonus = SPEED_FACTOR * base * clamp(1 - elapsed/SPEED_WINDOW_SEC, 0, 1) */
   SPEED_FACTOR: 0.3,
   SPEED_WINDOW_SEC: 90 * 60,
+  /** flat creds for being the first to clear a puzzle */
+  FIRST_BLOOD_CREDS: 10,
 } as const;
 
 export function clamp(n: number, lo: number, hi: number): number {
@@ -60,14 +62,17 @@ export function scoreSolve(
 
 /** Human-readable formula, rendered on the leaderboard / rules page. */
 export const SCORING_EXPLAINER = `
-Each solve = **base** + **rank bonus** + **speed bonus**.
+**Points** are your leaderboard rank. Each solve = **base** + **rank bonus** + **speed bonus**.
 
-- **base** — fixed per puzzle by difficulty (100 / 200 / 350 / 500).
+- **base** — fixed per room by difficulty.
 - **rank bonus** — ${SCORING.RANK_FACTOR} × base × ${SCORING.RANK_DECAY}^(N), where N is how many
-  people solved it before you. First blood earns the most; it fades to 0 after ~15 solvers.
-- **speed bonus** — up to ${SCORING.SPEED_FACTOR} × base, scaling linearly from full (instant) down
-  to 0 at ${SCORING.SPEED_WINDOW_SEC / 60} minutes after the module opened for you.
+  people cracked it before you. First blood earns the most; it fades to 0 after ~15 solvers.
+- **speed bonus** — up to ${SCORING.SPEED_FACTOR} × base, scaling from full (instant) down to 0
+  at ${SCORING.SPEED_WINDOW_SEC / 60} minutes after the room opened for you.
 
-Wrong answers never cost points — only a few seconds of cooldown. Hints cost whatever
-their listed price is (many are free).
+Wrong answers never cost points — just a short cooldown (a couple of rooms charge a small
+**cred** toll for wrong guesses; they warn you).
+
+**Creds** are separate — a wallet you fill with loot and spend at SUDO on hints, keycards and
+trades. Spending creds **never** changes your rank.
 `.trim();

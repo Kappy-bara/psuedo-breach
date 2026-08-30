@@ -11,8 +11,8 @@ Keep this open during the event. Admin panel: `/admin` (log in as `ADMIN001`).
 
 ## Before you flip it live (event day, afternoon)
 
-- [ ] Log in with a burner account, solve `orientation` on production.
-- [ ] `npm run selftest` against production DB → 17/17.
+- [ ] Log in with a burner account, crack `lobby` on production.
+- [ ] `npm run selftest` against production DB → all green (crawls the whole dungeon).
 - [ ] Confirm event `startsAt` / `endsAt` in `/admin` (IST = UTC+5:30).
 - [ ] `accounts.csv` generated, spot-checked, distributed.
 - [ ] Note the current Vercel deployment — that's your rollback target.
@@ -22,25 +22,33 @@ Keep this open during the event. Admin panel: `/admin` (log in as `ADMIN001`).
 
 | symptom | do this |
 |---|---|
-| Site slow / Neon CPU pinned | `/api/leaderboard` cache TTL is 3s in code — bump `TTL_MS` in `src/app/api/leaderboard/route.ts` to 10000, redeploy. Enable Neon autoscaling. |
-| A puzzle is unsolvable / wrong flag | `/admin` → that event → click the module chip to **hide** it. Post an announcement. Award nothing rather than a broken flag. |
-| Someone hammering `/api/submit` | Rate limiter already returns 429. If it's abuse, `/admin/users` → **lock** the account. |
-| Flag sharing | `/admin` → "FLAG-SHARING FLAGS" panel lists `submittedBy → mintedFor`. Lock the sharer, tell the organisers, keep the audit row. |
+| Site slow / Neon CPU pinned | leaderboard cache TTL is 3s (`BOARD_TTL_MS` in `src/lib/game.ts`) — bump to 10000, redeploy. Enable Neon autoscaling. |
+| A room is unsolvable / wrong flag | `/admin` → that event → click the room chip to **hide** it. Post an announcement. |
+| A player is stuck with no keycard (missed loot / bug) | `/admin/users` → find them → **grant** the item key (e.g. `keycard-red`, `frag-alpha`, `cred`) qty N. |
+| Someone hammering `/api/submit` or `/api/trade` | Rate limiter returns 429. If it's abuse, `/admin/users` → **lock** the account. |
+| Flag sharing | `/admin` → "FLAG-SHARING FLAGS" lists `submittedBy → mintedFor`. Lock the sharer, keep the audit row. Per-user flags are only on the two `perUserFlag` puzzles (`reception-caesar`, `core-final`). |
 | Bad deploy | Vercel → Deployments → the last good one → **Promote to Production**. |
 | Someone forgot their password | `/admin/users` → search → **reset pw** → read the new one to them privately. |
-| Need to nudge everyone | `/admin` → announcement box → post (markdown OK). Shows as a banner on every dashboard within a refresh. |
+| Need to nudge everyone | `/admin` → announcement box → post (markdown OK). Banner on every dashboard within a refresh. |
 
-## Scoring reference (if a participant asks)
+## Scoring / economy reference (if a participant asks)
 
-`solve = base + rankBonus + speedBonus`
+**Points** (leaderboard): `solve = base + rankBonus + speedBonus`
 
-- base: 100 / 150 / 200 / 250 / 300 / 350 / 500 by puzzle
+- base: per room by difficulty (50–350)
 - rankBonus = `0.5 × base × 0.85^N`, N = solvers before you (→ 0 after ~15)
-- speedBonus = up to `0.3 × base`, linear from instant → 0 at 90 min after the module opened
+- speedBonus = up to `0.3 × base`, linear from instant → 0 at 90 min after the room opened
 - wrong answers: no point loss, ~15s cooldown
-- hints: mostly free; a few are token-gated or terminal-only
 
-Constants live in [`src/lib/scoring.ts`](../src/lib/scoring.ts).
+**Creds** (wallet): loot drops + 10 for first blood. Spent at SUDO. R5 THE HONEYPOT charges
+5 creds per wrong guess. Creds never affect the leaderboard.
+
+Item keys for `/admin` grants: `cred`, `frag-alpha`, `frag-beta`, `keycard-blue`,
+`keycard-red`, `keycard-green`, `keycard-black`, `keycard-master`, `loot-old-badge`,
+`loot-coffee`, `trophy-sweettooth`, `trophy-root`.
+
+Constants live in [`src/lib/scoring.ts`](../src/lib/scoring.ts); economy in
+[`prisma/seed.ts`](../prisma/seed.ts).
 
 ## After
 

@@ -51,6 +51,29 @@ export async function setModuleHidden(formData: FormData) {
   revalidatePath("/admin");
 }
 
+export async function grantItemToUser(formData: FormData) {
+  const admin = await requireAdmin();
+  const userId = String(formData.get("userId"));
+  const itemKey = String(formData.get("itemKey") ?? "").trim();
+  const qty = Math.max(1, Math.min(999, Number(formData.get("qty") ?? 1)));
+  if (!itemKey) return;
+  await prisma.inventoryEntry.upsert({
+    where: { userId_itemKey: { userId, itemKey } },
+    update: { quantity: { increment: qty } },
+    create: { userId, itemKey, quantity: qty },
+  });
+  await prisma.auditLog.create({
+    data: {
+      action: "admin-grant-item",
+      actorId: admin.id,
+      targetType: "user",
+      targetId: userId,
+      meta: JSON.stringify({ itemKey, qty }),
+    },
+  });
+  revalidatePath("/admin/users");
+}
+
 export async function setUserLocked(formData: FormData) {
   const admin = await requireAdmin();
   const userId = String(formData.get("userId"));

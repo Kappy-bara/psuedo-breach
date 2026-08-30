@@ -11,41 +11,52 @@ const themeAccent: Record<string, string> = {
 };
 
 export function ModuleCard({ m }: { m: ModuleCardView }) {
-  const done = m.puzzleCount > 0 && m.solvedCount === m.puzzleCount;
+  const done = m.cleared;
   const accent = themeAccent[m.theme] ?? themeAccent.default;
+  const pct = m.puzzleCount ? Math.round((m.solvedCount / m.puzzleCount) * 100) : 0;
 
   const inner = (
     <div
-      className={`group h-full border p-4 transition-colors ${
-        m.locked
-          ? "border-border bg-panel/40 opacity-70"
-          : done
-            ? "border-accent/50 bg-accent/[0.06]"
-            : "border-border bg-panel/60 hover:border-ink-dim"
-      }`}
+      className={`panel panel-hover relative flex h-full flex-col p-4 ${
+        m.locked ? "opacity-60 grayscale-[0.4]" : ""
+      } ${done ? "border-accent/45 bg-accent/[0.05]" : ""}`}
     >
-      <div className="flex items-center justify-between">
-        <span className={`text-xs font-bold tracking-widest ${accent}`}>{m.title}</span>
-        <span className="text-xs text-ink-dim">
-          {m.locked ? "🔒" : done ? "✓ cleared" : `${m.solvedCount}/${m.puzzleCount}`}
+      <div className="flex items-start justify-between gap-2">
+        <span className={`text-xs font-bold tracking-[0.12em] ${accent}`}>{m.title}</span>
+        <span className="shrink-0 text-xs text-ink-dim">
+          {m.locked ? "🔒" : done ? "✓" : `${m.solvedCount}/${m.puzzleCount}`}
         </span>
       </div>
-      <p className="mt-2 text-sm text-ink-dim line-clamp-3">{m.blurb}</p>
-      <div className="mt-3 flex items-center justify-between text-xs text-ink-dim">
-        <span>
-          {m.locked ? (
-            <span className="text-accent-amber">{m.lockedReason}</span>
-          ) : (
-            <>
-              <span className="text-ink">{m.pointsEarned}</span> / {m.pointsAvailable} pts
-            </>
-          )}
-        </span>
-        {!m.locked && <span className="text-ink-dim group-hover:text-ink">open →</span>}
+
+      <p className="mt-2 line-clamp-3 flex-1 text-sm text-ink-dim">{m.blurb}</p>
+
+      {/* progress rail */}
+      {!m.locked && m.puzzleCount > 0 && (
+        <div className="mt-3 h-0.5 w-full bg-border">
+          <div
+            className={`h-full ${done ? "bg-accent" : "bg-ink-faint"}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+
+      <div className="mt-2 flex items-center justify-between text-xs">
+        {m.locked ? (
+          <span className="text-accent-amber">{m.lockedReason}</span>
+        ) : (
+          <span className="text-ink-dim">
+            <span className="text-ink">{m.pointsEarned}</span> / {m.pointsAvailable} pts
+          </span>
+        )}
+        {!m.locked && <span className="text-ink-faint">enter →</span>}
       </div>
     </div>
   );
 
   if (m.locked) return <div>{inner}</div>;
-  return <Link href={`/modules/${m.slug}`}>{inner}</Link>;
+  return (
+    <Link href={`/modules/${m.slug}`} className="block h-full">
+      {inner}
+    </Link>
+  );
 }

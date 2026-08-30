@@ -19,7 +19,7 @@ export default async function AdminHome() {
     },
   });
 
-  const [recentSolves, anomalies] = await Promise.all([
+  const [recentSolves, anomalies, recentTrades] = await Promise.all([
     prisma.solve.findMany({
       orderBy: { solvedAt: "desc" },
       take: 15,
@@ -30,7 +30,20 @@ export default async function AdminHome() {
       orderBy: { createdAt: "desc" },
       take: 10,
     }),
+    prisma.auditLog.findMany({
+      where: { action: "trade" },
+      orderBy: { createdAt: "desc" },
+      take: 15,
+    }),
   ]);
+  const traderNames = new Map(
+    (
+      await prisma.user.findMany({
+        where: { id: { in: recentTrades.map((t) => t.actorId ?? "") } },
+        select: { id: true, displayName: true },
+      })
+    ).map((u) => [u.id, u.displayName]),
+  );
 
   return (
     <div className="space-y-8">
@@ -155,6 +168,24 @@ export default async function AdminHome() {
               );
             })}
             {anomalies.length === 0 && <li>nothing flagged</li>}
+          </ul>
+        </section>
+
+        <section className="border border-border bg-panel/60 p-5">
+          <h2 className="text-xs tracking-widest text-ink-dim">// RECENT TRADES (SUDO)</h2>
+          <ul className="mt-3 space-y-1 text-sm text-ink-dim">
+            {recentTrades.map((t) => {
+              const meta = JSON.parse(t.meta || "{}");
+              return (
+                <li key={t.id}>
+                  <span className="text-ink">
+                    {traderNames.get(t.actorId ?? "") ?? "someone"}
+                  </span>{" "}
+                  — {meta.label}
+                </li>
+              );
+            })}
+            {recentTrades.length === 0 && <li>no trades yet</li>}
           </ul>
         </section>
       </div>

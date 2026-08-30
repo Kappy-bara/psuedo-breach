@@ -52,10 +52,10 @@ export const rateLimiters = {
   submitIp: make(20, "10 s", "submit-ip"),
   /** login attempts, per IP */
   login: make(10, "60 s", "login"),
-  /** terminal server bridge (probe / knock), per user */
-  terminal: make(15, "10 s", "term"),
   /** hint unlocks, per user */
   hint: make(10, "60 s", "hint"),
+  /** NPC trades, per user */
+  trade: make(12, "10 s", "trade"),
 };
 
 export function clientIp(req: Request): string {

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/session";
-import { setUserLocked } from "@/lib/admin";
+import { setUserLocked, grantItemToUser } from "@/lib/admin";
 import { getLeaderboard } from "@/lib/game";
 import { ResetPasswordButton } from "./ResetPasswordButton";
 
@@ -95,6 +95,24 @@ export default async function AdminUsers({ searchParams }: PageProps<"/">) {
                       </button>
                     </form>
                     <ResetPasswordButton userId={u.id} />
+                    <form action={grantItemToUser} className="flex items-center gap-1">
+                      <input type="hidden" name="userId" value={u.id} />
+                      <input
+                        name="itemKey"
+                        placeholder="item key"
+                        className="w-24 border border-border bg-panel-2 px-1 py-0.5 text-xs outline-none focus:border-accent"
+                      />
+                      <input
+                        name="qty"
+                        type="number"
+                        defaultValue={1}
+                        min={1}
+                        className="w-12 border border-border bg-panel-2 px-1 py-0.5 text-xs outline-none focus:border-accent"
+                      />
+                      <button className="border border-border px-2 py-0.5 text-xs text-ink-dim hover:border-ink-dim">
+                        grant
+                      </button>
+                    </form>
                   </div>
                 </td>
               </tr>

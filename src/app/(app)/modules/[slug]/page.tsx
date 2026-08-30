@@ -15,20 +15,29 @@ export default async function ModulePage({ params }: PageProps<"/modules/[slug]"
     <div className="space-y-6">
       <div>
         <Link href="/dashboard" className="text-xs text-ink-dim hover:text-ink">
-          ← all modules
+          ← the stack
         </Link>
         <h1 className="mt-2 text-2xl font-bold tracking-tight">{mod.title}</h1>
         <p className="mt-1 text-ink-dim">{mod.blurb}</p>
+        {mod.clearRewardLabel && !mod.cleared && (
+          <p className="mt-1 text-xs text-ink-dim">
+            clear the whole room for: <span className="text-accent">{mod.clearRewardLabel}</span>
+          </p>
+        )}
       </div>
 
-      {mod.locked && (
+      {mod.locked ? (
         <p className="border border-accent-amber/40 bg-accent-amber/[0.06] px-4 py-3 text-sm text-accent-amber">
-          🔒 {mod.lockedReason}. You can read the puzzles, but you can&apos;t submit until this
-          opens.
+          🔒 {mod.lockedReason}. You can read what&apos;s in here, but you can&apos;t crack it
+          until it opens. Try SUDO.
         </p>
-      )}
+      ) : mod.cleared ? (
+        <p className="border border-accent/40 bg-accent/[0.06] px-4 py-3 text-sm text-accent">
+          ✓ Room cleared. Loot&apos;s in your satchel.
+        </p>
+      ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
+      <div className="grid gap-6 lg:grid-cols-[1fr_18rem]">
         <div className="space-y-4">
           {mod.puzzles.map((p) => (
             <PuzzlePanel key={p.slug} puzzle={p} moduleLocked={mod.locked} />
@@ -37,14 +46,11 @@ export default async function ModulePage({ params }: PageProps<"/modules/[slug]"
         <div className="space-y-4">
           <HintPanel hints={mod.hints} />
           <Link
-            href="/terminal"
-            className="block border border-border bg-panel/60 p-4 text-sm text-ink-dim hover:border-ink-dim"
+            href="/market"
+            className="block panel p-3 text-xs text-ink-dim hover:border-ink-dim"
           >
-            <span className="text-accent-cyan">open the terminal →</span>
-            <br />
-            Run <code className="text-ink">probe(&quot;{mod.slug}&quot;)</code> or{" "}
-            <code className="text-ink">knock(&quot;{mod.slug}&quot;, ...)</code> for things this
-            page won&apos;t tell you.
+            <span className="text-accent-cyan">SUDO&apos;s market →</span> buy intel, forge
+            keycards, cash in loot.
           </Link>
         </div>
       </div>

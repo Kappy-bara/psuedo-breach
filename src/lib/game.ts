@@ -2,7 +2,8 @@ import { prisma } from "@/lib/db";
 import { parseJson } from "@/lib/json";
 import { renderPrompt } from "@/lib/prompt";
 import { userFlag } from "@/lib/flags";
-import type { Event, Hint, Module, Puzzle, User } from "@prisma/client";
+import { type ItemMap, holds, getInventoryMap } from "@/lib/inventory";
+import type { Event, Hint, Item, Module, Puzzle, User } from "@prisma/client";
 
 /* ─────────────────────────── events ─────────────────────────── */
 
@@ -10,7 +11,7 @@ export async function getEventBySlug(slug: string): Promise<Event | null> {
   return prisma.event.findUnique({ where: { slug } });
 }
 
-export function eventIsOpen(event: Event, now = new Date()): boolean {
+export function eventIsOpen(event: Event): boolean {
   if (event.status === "live") return true;
   if (event.isDemo && event.status !== "ended") return true;
   return false;
@@ -18,30 +19,29 @@ export function eventIsOpen(event: Event, now = new Date()): boolean {
 
 export function eventPhase(event: Event, now = new Date()): "before" | "open" | "ended" {
   if (event.status === "ended" || now > event.endsAt) return "ended";
-  if (eventIsOpen(event, now)) return "open";
+  if (eventIsOpen(event)) return "open";
   return "before";
 }
 
-/* ─────────────────────────── tokens ─────────────────────────── */
+/* ─────────────────────────── item catalogue ─────────────────────────── */
 
-export async function userTokenKeys(userId: string): Promise<Set<string>> {
-  const grants = await prisma.tokenGrant.findMany({
-    where: { userId },
-    select: { key: true },
-  });
-  return new Set(grants.map((g) => g.key));
+export async function getItemCatalog(eventId: string): Promise<Map<string, Item>> {
+  const items = await prisma.item.findMany({ where: { eventId } });
+  return new Map(items.map((i) => [i.key, i]));
 }
 
-export async function grantToken(
-  userId: string,
-  key: string,
-  sourcePuzzleId?: string,
-): Promise<void> {
-  await prisma.tokenGrant.upsert({
-    where: { userId_key: { userId, key } },
-    update: {},
-    create: { userId, key, sourcePuzzleId: sourcePuzzleId ?? null },
-  });
+/** "🔑 Red Keycard ×1, 🧩 Shard ×2" */
+export function describeItemMap(map: ItemMap, catalog: Map<string, Item>): string {
+  return (
+    Object.entries(map)
+      .filter(([, q]) => q > 0)
+      .map(([k, q]) => {
+        const it = catalog.get(k);
+        const label = it ? `${it.icon} ${it.name}` : k;
+        return q > 1 ? `${label} ×${q}` : label;
+      })
+      .join(", ") || "nothing"
+  );
 }
 
 /* ─────────────────────────── modules ─────────────────────────── */
@@ -58,37 +58,45 @@ export interface ModuleCardView {
   puzzleCount: number;
   pointsAvailable: number;
   pointsEarned: number;
+  cleared: boolean;
 }
 
 function moduleLockReason(
   module: Module,
-  tokens: Set<string>,
+  inv: ItemMap,
+  catalog: Map<string, Item>,
   now: Date,
+  cleared: boolean,
 ): string | null {
-  const prereqs = parseJson<string[]>(module.prerequisiteTokenKeys, []);
-  const missing = prereqs.filter((k) => !tokens.has(k));
-  if (missing.length) return `Needs token${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`;
-  if (module.unlockAt && now < module.unlockAt)
-    return `Unlocks ${module.unlockAt.toISOString()}`;
+  if (cleared) return null; // a room you've cleared never re-locks (keycards may get spent later)
+  const need = parseJson<ItemMap>(module.prerequisiteItemsJson, {});
+  const { ok, missing } = holds(inv, need);
+  if (!ok) return `Locked — need ${describeItemMap(missing, catalog)}`;
+  if (module.unlockAt && now < module.unlockAt) return `Opens later`;
   return null;
 }
 
 export async function getModuleCards(user: User): Promise<ModuleCardView[]> {
   const now = new Date();
-  const [modules, tokens, solves] = await Promise.all([
+  const [modules, inv, catalog, solves] = await Promise.all([
     prisma.module.findMany({
       where: { eventId: user.eventId, isHidden: false },
       orderBy: { order: "asc" },
       include: { puzzles: { where: { isHidden: false } } },
     }),
-    userTokenKeys(user.id),
-    prisma.solve.findMany({ where: { userId: user.id }, select: { puzzleId: true, basePts: true, bonusPts: true } }),
+    getInventoryMap(user.id),
+    getItemCatalog(user.eventId),
+    prisma.solve.findMany({
+      where: { userId: user.id },
+      select: { puzzleId: true, basePts: true, bonusPts: true },
+    }),
   ]);
   const solveByPuzzle = new Map(solves.map((s) => [s.puzzleId, s]));
 
   return modules.map((m) => {
-    const reason = moduleLockReason(m, tokens, now);
     const solved = m.puzzles.filter((p) => solveByPuzzle.has(p.id));
+    const cleared = m.puzzles.length > 0 && solved.length === m.puzzles.length;
+    const reason = moduleLockReason(m, inv, catalog, now, cleared);
     return {
       slug: m.slug,
       title: m.title,
@@ -101,9 +109,11 @@ export async function getModuleCards(user: User): Promise<ModuleCardView[]> {
       puzzleCount: m.puzzles.length,
       pointsAvailable: m.puzzles.reduce((a, p) => a + p.basePoints, 0),
       pointsEarned: solved.reduce(
-        (a, p) => a + (solveByPuzzle.get(p.id)!.basePts + solveByPuzzle.get(p.id)!.bonusPts),
+        (a, p) =>
+          a + (solveByPuzzle.get(p.id)!.basePts + solveByPuzzle.get(p.id)!.bonusPts),
         0,
       ),
+      cleared,
     };
   });
 }
@@ -113,18 +123,17 @@ export async function getModuleCards(user: User): Promise<ModuleCardView[]> {
 export type HintUnlockRule =
   | { kind: "free" }
   | { kind: "auto-after-wrong"; n: number }
-  | { kind: "token"; key: string }
-  | { kind: "terminal"; knockKey: string; requireTokens?: string[]; revealFlagFor?: string }
-  | { kind: "paid" };
+  | { kind: "item"; key: string }
+  | { kind: "buy"; cost: number }
+  | { kind: "npc" };
 
 export interface HintView {
   id: string;
   order: number;
-  cost: number;
   unlocked: boolean;
   lockedHint: string;
+  buyCost: number | null; // set when the rule is "buy" and it's not unlocked yet
   contentMd: string | null;
-  grantsTokenKey: string | null;
 }
 
 export interface PuzzleView {
@@ -139,8 +148,10 @@ export interface PuzzleView {
   wrongCount: number;
   cooldownUntil: number | null;
   cooldownSec: number;
-  leakInSource: string | null; // a flag string to embed as an HTML comment (demo/orientation)
-  domFlagB64: string | null; // for DOM DIMENSION style puzzles
+  wrongCostCreds: number;
+  rewardsLabel: string | null;
+  leakInSource: string | null;
+  domFlagB64: string | null;
 }
 
 export interface ModuleDetailView {
@@ -150,44 +161,45 @@ export interface ModuleDetailView {
   theme: string;
   locked: boolean;
   lockedReason: string | null;
+  clearRewardLabel: string | null;
+  cleared: boolean;
   puzzles: PuzzleView[];
   hints: HintView[];
 }
 
-async function hintIsUnlocked(
+function hintUnlocked(
   hint: Hint,
-  userId: string,
-  tokens: Set<string>,
-  wrongCounts: Map<string, number>,
-): Promise<boolean> {
-  const already = await prisma.hintUnlock.findUnique({
-    where: { userId_hintId: { userId, hintId: hint.id } },
-  });
-  if (already) return true;
+  alreadyUnlocked: boolean,
+  inv: ItemMap,
+  wrongCount: number,
+): boolean {
+  if (alreadyUnlocked) return true;
   const rule = parseJson<HintUnlockRule>(hint.unlockRule, { kind: "free" });
   switch (rule.kind) {
     case "free":
       return true;
-    case "token":
-      return tokens.has(rule.key);
+    case "item":
+      return (inv[rule.key] ?? 0) > 0;
     case "auto-after-wrong":
-      return (wrongCounts.get(hint.puzzleId ?? "") ?? 0) >= rule.n;
-    case "terminal":
-    case "paid":
+      return wrongCount >= rule.n;
+    case "buy":
+    case "npc":
       return false;
   }
 }
 
-function lockedHintLabel(rule: HintUnlockRule): string {
+function lockedHintLabel(rule: HintUnlockRule, catalog: Map<string, Item>): string {
   switch (rule.kind) {
-    case "token":
-      return `Locked — needs the "${rule.key}" token`;
+    case "item": {
+      const it = catalog.get(rule.key);
+      return `Locked — hold ${it ? `${it.icon} ${it.name}` : rule.key}`;
+    }
     case "auto-after-wrong":
-      return `Unlocks automatically after ${rule.n} wrong answers`;
-    case "terminal":
-      return `Hidden — reachable from the terminal (knock)`;
-    case "paid":
-      return `Costs points to reveal`;
+      return `Unlocks after ${rule.n} wrong answers`;
+    case "buy":
+      return `Buy for ${rule.cost} 💰`;
+    case "npc":
+      return `Only from SUDO`;
     default:
       return "Locked";
   }
@@ -207,18 +219,25 @@ export async function getModuleDetail(
   });
   if (!module || module.isHidden) return null;
 
-  const tokens = await userTokenKeys(user.id);
-  const reason = moduleLockReason(module, tokens, now);
-
   const puzzleIds = module.puzzles.map((p) => p.id);
-  const [solves, submissions] = await Promise.all([
+  const [inv, catalog, solves, submissions, hintUnlocks] = await Promise.all([
+    getInventoryMap(user.id),
+    getItemCatalog(user.eventId),
     prisma.solve.findMany({ where: { userId: user.id, puzzleId: { in: puzzleIds } } }),
     prisma.submission.findMany({
       where: { userId: user.id, puzzleId: { in: puzzleIds }, isCorrect: false },
       orderBy: { createdAt: "desc" },
     }),
+    prisma.hintUnlock.findMany({
+      where: { userId: user.id, hintId: { in: module.hints.map((h) => h.id) } },
+      select: { hintId: true },
+    }),
   ]);
   const solveByPuzzle = new Map(solves.map((s) => [s.puzzleId, s]));
+  const cleared =
+    module.puzzles.length > 0 && module.puzzles.every((p) => solveByPuzzle.has(p.id));
+  const reason = moduleLockReason(module, inv, catalog, now, cleared);
+  const unlockedHintIds = new Set(hintUnlocks.map((u) => u.hintId));
   const wrongCounts = new Map<string, number>();
   const lastWrong = new Map<string, Date>();
   for (const s of submissions) {
@@ -227,13 +246,16 @@ export async function getModuleDetail(
   }
 
   const puzzles: PuzzleView[] = module.puzzles.map((p: Puzzle) => {
-    const cfg = parseJson<{ leakInSource?: boolean; answer?: string; domFlagB64?: string }>(
-      p.validatorConfig,
-      {},
-    );
+    const cfg = parseJson<{
+      leakInSource?: boolean;
+      answer?: string;
+      domFlagB64?: string;
+      wrongCostCreds?: number;
+    }>(p.validatorConfig, {});
     const solve = solveByPuzzle.get(p.id) ?? null;
     const lw = lastWrong.get(p.id);
     const cd = lw ? lw.getTime() + p.cooldownSec * 1000 : null;
+    const rewards = parseJson<ItemMap>(p.rewardsJson, {});
     return {
       slug: p.slug,
       title: p.title,
@@ -253,26 +275,28 @@ export async function getModuleDetail(
       wrongCount: wrongCounts.get(p.id) ?? 0,
       cooldownUntil: cd && cd > Date.now() ? cd : null,
       cooldownSec: p.cooldownSec,
-      leakInSource:
-        cfg.leakInSource && cfg.answer ? cfg.answer : null,
+      wrongCostCreds: cfg.wrongCostCreds ?? 0,
+      rewardsLabel: Object.keys(rewards).length ? describeItemMap(rewards, catalog) : null,
+      leakInSource: cfg.leakInSource && cfg.answer ? cfg.answer : null,
       domFlagB64: cfg.domFlagB64 ?? null,
     };
   });
 
-  const hints: HintView[] = [];
-  for (const h of module.hints) {
+  const hints: HintView[] = module.hints.map((h) => {
     const rule = parseJson<HintUnlockRule>(h.unlockRule, { kind: "free" });
-    const unlocked = await hintIsUnlocked(h, user.id, tokens, wrongCounts);
-    hints.push({
+    const wc = h.puzzleId ? (wrongCounts.get(h.puzzleId) ?? 0) : 0;
+    const unlocked = hintUnlocked(h, unlockedHintIds.has(h.id), inv, wc);
+    return {
       id: h.id,
       order: h.order,
-      cost: h.cost,
       unlocked,
-      lockedHint: lockedHintLabel(rule),
+      lockedHint: lockedHintLabel(rule, catalog),
+      buyCost: !unlocked && rule.kind === "buy" ? rule.cost : null,
       contentMd: unlocked ? h.contentMd : null,
-      grantsTokenKey: h.grantsTokenKey,
-    });
-  }
+    };
+  });
+
+  const clearReward = parseJson<ItemMap>(module.clearRewardJson, {});
 
   return {
     slug: module.slug,
@@ -281,6 +305,10 @@ export async function getModuleDetail(
     theme: module.theme,
     locked: reason !== null,
     lockedReason: reason,
+    clearRewardLabel: Object.keys(clearReward).length
+      ? describeItemMap(clearReward, catalog)
+      : null,
+    cleared,
     puzzles,
     hints,
   };
@@ -289,18 +317,11 @@ export async function getModuleDetail(
 /* ─────────────────────────── score & leaderboard ─────────────────────────── */
 
 export async function getUserScore(userId: string): Promise<number> {
-  const [solveAgg, hintAgg] = await Promise.all([
-    prisma.solve.aggregate({
-      where: { userId },
-      _sum: { basePts: true, bonusPts: true },
-    }),
-    prisma.hintUnlock.aggregate({ where: { userId }, _sum: { costPaid: true } }),
-  ]);
-  return (
-    (solveAgg._sum.basePts ?? 0) +
-    (solveAgg._sum.bonusPts ?? 0) -
-    (hintAgg._sum.costPaid ?? 0)
-  );
+  const agg = await prisma.solve.aggregate({
+    where: { userId },
+    _sum: { basePts: true, bonusPts: true },
+  });
+  return (agg._sum.basePts ?? 0) + (agg._sum.bonusPts ?? 0);
 }
 
 export interface LeaderRow {
@@ -333,14 +354,12 @@ export async function getLeaderboard(
       displayName: true,
       branch: true,
       solves: { select: { basePts: true, bonusPts: true, solvedAt: true } },
-      hintUnlocks: { select: { costPaid: true } },
     },
   });
 
   const rows = users
     .map((u) => {
-      const gained = u.solves.reduce((a, s) => a + s.basePts + s.bonusPts, 0);
-      const spent = u.hintUnlocks.reduce((a, h) => a + h.costPaid, 0);
+      const score = u.solves.reduce((a, s) => a + s.basePts + s.bonusPts, 0);
       const last = u.solves.reduce<number | null>(
         (mx, s) => Math.max(mx ?? 0, s.solvedAt.getTime()),
         null,
@@ -349,7 +368,7 @@ export async function getLeaderboard(
         userId: u.id,
         displayName: u.displayName,
         branch: u.branch,
-        score: gained - spent,
+        score,
         solveCount: u.solves.length,
         lastSolveAt: last,
         isYou: u.id === forUserId,
@@ -377,5 +396,4 @@ export async function getAnnouncements(eventId: string, take = 5) {
   });
 }
 
-/* expose for terminal/knock */
 export { userFlag };
