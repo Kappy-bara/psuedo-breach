@@ -66,12 +66,25 @@ export function DungeonMap({ rooms }: { rooms: ModuleCardView[] }) {
   const hasCountdown = rooms.some((r) => r.opensAt || r.closesAt);
   const now = useClock(hasCountdown);
 
+  const minX = Math.min(...rooms.map((r) => r.mapX), 0);
+  const minY = Math.min(...rooms.map((r) => r.mapY), 0);
   const maxX = Math.max(...rooms.map((r) => r.mapX), 0);
   const maxY = Math.max(...rooms.map((r) => r.mapY), 0);
-  const W = maxX * CELL + PAD * 2;
-  const H = maxY * CELL + PAD * 2;
-  const px = (gx: number) => PAD + gx * CELL;
-  const py = (gy: number) => PAD + gy * CELL;
+  const W = (maxX - minX) * CELL + PAD * 2;
+  const H = (maxY - minY) * CELL + PAD * 2;
+  const px = (gx: number) => PAD + (gx - minX) * CELL;
+  const py = (gy: number) => PAD + (gy - minY) * CELL;
+
+  const zones = new Map<string, { minX: number; minY: number; maxX: number; maxY: number }>();
+  for (const r of rooms) {
+    if (!r.mapZone) continue;
+    const z = zones.get(r.mapZone) ?? { minX: r.mapX, minY: r.mapY, maxX: r.mapX, maxY: r.mapY };
+    z.minX = Math.min(z.minX, r.mapX);
+    z.minY = Math.min(z.minY, r.mapY);
+    z.maxX = Math.max(z.maxX, r.mapX);
+    z.maxY = Math.max(z.maxY, r.mapY);
+    zones.set(r.mapZone, z);
+  }
 
   const bySlug = new Map(rooms.map((r) => [r.slug, r]));
   const edges: [ModuleCardView, ModuleCardView][] = [];
@@ -117,15 +130,47 @@ export function DungeonMap({ rooms }: { rooms: ModuleCardView[] }) {
               <path d="M33 0H0V33" fill="none" stroke="rgba(120,150,190,0.07)" strokeWidth="1" />
             </pattern>
           </defs>
+          <style>{`
+            @keyframes dash {
+              to { stroke-dashoffset: -1000; }
+            }
+            @keyframes pulse-glow {
+              0%, 100% { filter: drop-shadow(0 0 2px var(--color-accent)); }
+              50% { filter: drop-shadow(0 0 10px var(--color-accent)); }
+            }
+          `}</style>
+          
           <rect x="0" y="0" width={W} height={H} fill="url(#mapgrid)" />
+
+          {/* zones */}
+          {Array.from(zones.entries()).map(([name, box]) => {
+            const x = px(box.minX) - CELL / 2;
+            const y = py(box.minY) - CELL / 2 - 10;
+            const w = (box.maxX - box.minX + 1) * CELL;
+            const h = (box.maxY - box.minY + 1) * CELL + 20;
+            return (
+              <g key={name}>
+                <rect x={x} y={y} width={w} height={h} fill="var(--color-panel)" opacity="0.3" stroke="var(--color-border)" strokeWidth="1" strokeDasharray="8 4" rx="12" />
+                <text x={x + 14} y={y + 22} fontFamily="var(--font-display)" fontSize="12" fontWeight="bold" fill="var(--color-ink-dim)" letterSpacing="0.2em" style={{ textTransform: 'uppercase' }}>
+                  [ {name} ]
+                </text>
+              </g>
+            );
+          })}
 
           {/* corridors */}
           {edges.map(([a, b], i) => {
             const live = !a.locked && !b.locked;
             return (
-              <g key={i} stroke={live ? "var(--color-border-bright)" : "var(--color-border)"}>
-                <line x1={px(a.mapX)} y1={py(a.mapY)} x2={px(b.mapX)} y2={py(b.mapY)} strokeWidth="6" opacity="0.35" />
-                <line x1={px(a.mapX)} y1={py(a.mapY)} x2={px(b.mapX)} y2={py(b.mapY)} strokeWidth="1.5" />
+              <g key={i}>
+                {live ? (
+                  <>
+                    <line x1={px(a.mapX)} y1={py(a.mapY)} x2={px(b.mapX)} y2={py(b.mapY)} strokeWidth="6" stroke="var(--color-accent)" opacity="0.15" />
+                    <line x1={px(a.mapX)} y1={py(a.mapY)} x2={px(b.mapX)} y2={py(b.mapY)} strokeWidth="2" stroke="var(--color-accent)" strokeDasharray="6 6" style={{ animation: 'dash 30s linear infinite' }} />
+                  </>
+                ) : (
+                  <line x1={px(a.mapX)} y1={py(a.mapY)} x2={px(b.mapX)} y2={py(b.mapY)} strokeWidth="1.5" stroke="var(--color-border)" />
+                )}
               </g>
             );
           })}
@@ -192,6 +237,7 @@ export function DungeonMap({ rooms }: { rooms: ModuleCardView[] }) {
                   fill={fill}
                   stroke={stroke}
                   strokeWidth={hover === r.slug && clickable ? 2 : 1.25}
+                  style={st === "open" || st === "progress" ? { animation: "pulse-glow 3s ease-in-out infinite" } : undefined}
                 />
                 {st === "open" && (
                   <path d={path} fill="none" stroke="var(--color-accent)" strokeWidth="1.25" style={{ animation: "node-pulse 2.4s ease-in-out infinite" }} />

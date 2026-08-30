@@ -505,6 +505,57 @@ const mainEvent: EventSeed = {
   },
   modules: [
     {
+      slug: "linux-basics",
+      title: "T0 · LINUX 101",
+      theme: "cyan",
+      blurb: "Learn to navigate and manage files in a terminal.",
+      map: { x: -1, y: 0, zone: "tutorial" },
+      clearReward: { cred: 10 },
+      puzzles: [
+        {
+          slug: "linux-sim",
+          title: "The Filesystem Simulation",
+          basePoints: 100,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{L1NUX_S1MUL4T10N_D0N3}" },
+          rewards: { cred: 15 },
+          promptMd: "Open the **toolkit**. The toolkit has a simulated filesystem.\n\nHere is what the commands do:\n- `ls`: List files in the current directory.\n- `pwd`: Print your current working directory.\n- `cd <dir>`: Change into a directory.\n- `mkdir <dir>`: Create a new directory.\n- `touch <file>`: Create a new empty file.\n- `cp <src> <dest>`: Copy a file.\n- `mv <src> <dest>`: Move a file.\n- `rm <file>`: Remove a file.\n\n**Goal:** Use the commands to create a directory named `backups` and move a newly created file named `secret.txt` inside it. The simulation will grant you the flag when successful.",
+        }
+      ],
+      hints: [
+        { contentMd: "First, create the file: `touch secret.txt`", rule: { kind: "free" } },
+        { contentMd: "Next, create the directory: `mkdir backups`", rule: { kind: "free" } },
+        { contentMd: "Finally, move the file into the directory: `mv secret.txt backups`", rule: { kind: "free" } },
+        { contentMd: "If you get an error like 'no such file or directory', make sure you created the file/folder first before trying to move it! If you get stuck, run `reset` to start over.", rule: { kind: "free" } },
+      ],
+    },
+    {
+      slug: "git-basics",
+      title: "T1 · GIT 101",
+      theme: "amber",
+      blurb: "Version control fundamentals. Get your code on GitHub.",
+      map: { x: 0, y: 2, zone: "tutorial" },
+      clearReward: { cred: 10 },
+      puzzles: [
+        {
+          slug: "git-sim",
+          title: "The Git Simulation",
+          basePoints: 100,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{G1T_S1MUL4T10N_D0N3}" },
+          rewards: { cred: 15 },
+          promptMd: "Open the **toolkit**. The toolkit has a simulated Git environment.\n\nHere is what the commands do:\n- `git init`: Initialize a new empty Git repository.\n- `git status`: Show the working tree status.\n- `git add`: Stage changes for the next commit.\n- `git commit`: Record staged changes to the repository history.\n\n**Goal:** Create a file named `code.js` (using `touch`), initialize a git repository (`git init`), add the file (`git add`), and commit it (`git commit`). The simulation will grant you the flag when successful.",
+        }
+      ],
+      hints: [
+        { contentMd: "Step 1: Create the file. `touch code.js`", rule: { kind: "free" } },
+        { contentMd: "Step 2: Initialize Git. `git init`", rule: { kind: "free" } },
+        { contentMd: "Step 3: Stage the changes. `git add`", rule: { kind: "free" } },
+        { contentMd: "Step 4: Commit. `git commit`", rule: { kind: "free" } },
+        { contentMd: "If you get 'fatal: not a git repository', run `git init` first! If you get 'nothing to commit', make sure you staged your changes with `git add`.", rule: { kind: "free" } },
+      ],
+    },
+    {
       slug: "lobby",
       title: "R0 · THE LOBBY",
       theme: "green",
@@ -824,6 +875,56 @@ Q01JTlVTezVVUFBMWV81TjRUQ0gzRH0=
       ],
       hints: [
         { contentMd: "toolkit → `unbase64 \"Q01JTlVTezVVUFBMWV81TjRUQ0gzRH0=\"`.", rule: { kind: "free" } },
+      ],
+    },
+    {
+      slug: "easter-eggs",
+      title: "E0 · ARCADE",
+      theme: "yellow",
+      blurb: "Stuck or bored? Take a break, play some games, get some points.",
+      map: { x: 5, y: 4, zone: "core" },
+      edges: ["broadcast-booth"],
+      clearReward: { cred: 10 },
+      puzzles: [
+        {
+          slug: "cheat-code",
+          title: "Option 1: The Cheat Code",
+          basePoints: 50,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{UP_UP_DOWN_DOWN_LEFT_RIGHT_LEFT_RIGHT_B_A}" },
+          rewards: { cred: 15 },
+          promptMd: "I'm stuck. I wish I had a classic Konami cheat code for infinite health... (Format: `CMINUS{UP_UP_DOWN_...}`)",
+        },
+        {
+          slug: "mini-game",
+          title: "Option 2: RPS Master",
+          basePoints: 75,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{G4M3R_M0D3_4CT1V4T3D}" },
+          rewards: { cred: 20 },
+          promptMd: "Go to the **Arcade** tab at the top. Beat the computer at Rock, Paper, Scissors 3 times in a row to get the flag!",
+        },
+        {
+          slug: "jumper",
+          title: "Option 3: Dino Jumper",
+          basePoints: 100,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{JUMP_4R0UND}" },
+          rewards: { cred: 25 },
+          promptMd: "Go to the **Arcade** tab. Play the Block Jumper game and score at least 10 points to get the flag!",
+        },
+        {
+          slug: "sudoku",
+          title: "Option 4: Sudoku",
+          basePoints: 150,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{SUD0KU_M4ST3R}" },
+          rewards: { cred: 30 },
+          promptMd: "Go to the **Arcade** tab. Solve the Sudoku puzzle to get the flag!",
+        }
+      ],
+      hints: [
+        { contentMd: "For Option 1, look up the 'Konami Code'. For the others, visit `/arcade`.", rule: { kind: "free" } },
       ],
     },
   ],

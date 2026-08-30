@@ -41,7 +41,70 @@ export const COMMANDS: { name: string; usage: string; blurb: string }[] = [
   { name: "hash", usage: 'hash "text"', blurb: "md5 + sha256." },
   { name: "help", usage: "help", blurb: "this." },
   { name: "about", usage: "about", blurb: "the tragic backstory of c-." },
+  { name: "ls", usage: "ls", blurb: "list directory contents." },
+  { name: "pwd", usage: "pwd", blurb: "print working directory." },
+  { name: "cd", usage: "cd <dir>", blurb: "change directory." },
+  { name: "mkdir", usage: "mkdir <dir>", blurb: "make directory." },
+  { name: "rmdir", usage: "rmdir <dir>", blurb: "remove empty directory." },
+  { name: "touch", usage: "touch <file>", blurb: "create an empty file." },
+  { name: "rm", usage: "rm <file>", blurb: "remove file." },
+  { name: "cp", usage: "cp <src> <dest>", blurb: "copy file." },
+  { name: "mv", usage: "mv <src> <dest>", blurb: "move file." },
+  { name: "git", usage: "git <init|add|commit|status>", blurb: "version control." },
 ];
+
+// --- Simulated Filesystem & Git State ---
+type VfsNode = { type: "file"; content: string } | { type: "dir"; children: Record<string, VfsNode> };
+let vfs: VfsNode = { type: "dir", children: {} };
+let vcwd: string[] = [];
+let gitState = { init: false, staged: false, commits: 0 };
+
+function resetSim() {
+  vfs = { type: "dir", children: {} };
+  vcwd = [];
+  gitState = { init: false, staged: false, commits: 0 };
+}
+
+function resolvePath(path: string) {
+  if (!path) return { name: "", parent: vfs, node: vfs };
+  const parts = path.startsWith("/") ? path.split("/").filter(Boolean) : [...vcwd, ...path.split("/").filter(Boolean)];
+  const norm: string[] = [];
+  for (const p of parts) {
+    if (p === ".") continue;
+    if (p === "..") norm.pop();
+    else norm.push(p);
+  }
+  if (norm.length === 0) return { name: "", parent: vfs, node: vfs };
+
+  let curr: VfsNode = vfs;
+  let parent: VfsNode = vfs;
+  let name = "";
+  for (let i = 0; i < norm.length; i++) {
+    const p = norm[i]!;
+    if (curr.type !== "dir") return null;
+    parent = curr;
+    name = p;
+    curr = curr.children[p] ?? (null as any);
+    if (!curr && i < norm.length - 1) return null;
+  }
+  return { name, parent, node: curr };
+}
+
+function checkSimWin() {
+  const msgs = [];
+  // Linux win condition: 'backups/secret.txt' exists
+  const backups = vfs.type === "dir" ? (vfs as any).children["backups"] : null;
+  if (backups && backups.type === "dir" && backups.children["secret.txt"]) {
+    msgs.push("CMINUS{L1NUX_S1MUL4T10N_D0N3}");
+  }
+  // Git win condition: git init done, code.js exists, 1 commit
+  const codejs = vfs.type === "dir" ? (vfs as any).children["code.js"] : null;
+  if (gitState.commits > 0 && codejs) {
+    msgs.push("CMINUS{G1T_S1MUL4T10N_D0N3}");
+  }
+  return msgs.length > 0 ? "\n\n*** SYSTEM ALERTS ***\n" + msgs.join("\n") : "";
+}
+// ----------------------------------------
 
 const ABOUT = `c- was going to be a real programming language.
 then i remembered you have six hours and a leaderboard to climb, not a CS degree.
@@ -216,6 +279,117 @@ export async function runLine(line: string): Promise<ToolResult> {
         if (e) return e;
         return ok(`md5:    ${md5(text!)}\nsha256: ${await sha256(text!)}`);
       }
+      
+      // -- Simulated FS Commands --
+      case "ls": {
+        const res = resolvePath(rest[0] || "");
+        if (!res || !res.node || res.node.type !== "dir") return nope("ls: no such directory");
+        const keys = Object.keys((res.node as any).children);
+        return ok(keys.length ? keys.join("  ") + checkSimWin() : "(empty)" + checkSimWin());
+      }
+      case "pwd": {
+        return ok("/" + vcwd.join("/") + checkSimWin());
+      }
+      case "cd": {
+        const res = resolvePath(rest[0] || "");
+        if (!res || !res.node || res.node.type !== "dir") return nope("cd: no such directory");
+        const parts = (rest[0] || "").startsWith("/") ? (rest[0] || "").split("/") : [...vcwd, ...(rest[0] || "").split("/")];
+        const norm: string[] = [];
+        for (const p of parts) { if (p && p !== ".") p === ".." ? norm.pop() : norm.push(p); }
+        vcwd = norm;
+        return ok(checkSimWin());
+      }
+      case "mkdir": {
+        if (!rest[0]) return nope("mkdir: missing operand");
+        const res = resolvePath(rest[0]);
+        if (!res || !res.parent || res.parent.type !== "dir") return nope("mkdir: cannot create directory");
+        if ((res.parent as any).children[res.name]) return nope("mkdir: file exists");
+        (res.parent as any).children[res.name] = { type: "dir", children: {} };
+        return ok(checkSimWin());
+      }
+      case "rmdir": {
+        if (!rest[0]) return nope("rmdir: missing operand");
+        const res = resolvePath(rest[0]);
+        if (!res || !res.node || res.node.type !== "dir") return nope("rmdir: no such directory");
+        if (Object.keys((res.node as any).children).length > 0) return nope("rmdir: directory not empty");
+        delete (res.parent as any).children[res.name];
+        return ok(checkSimWin());
+      }
+      case "touch": {
+        if (!rest[0]) return nope("touch: missing operand");
+        const res = resolvePath(rest[0]);
+        if (!res || !res.parent || res.parent.type !== "dir") return nope("touch: cannot touch");
+        if (!(res.parent as any).children[res.name]) {
+          (res.parent as any).children[res.name] = { type: "file", content: "" };
+        }
+        return ok(checkSimWin());
+      }
+      case "rm": {
+        if (!rest[0]) return nope("rm: missing operand");
+        const res = resolvePath(rest[0]);
+        if (!res || !res.node) return nope("rm: no such file or directory");
+        if (res.node.type === "dir") return nope("rm: is a directory");
+        delete (res.parent as any).children[res.name];
+        return ok(checkSimWin());
+      }
+      case "cp": {
+        if (!rest[0] || !rest[1]) return nope("cp: missing file operand");
+        const src = resolvePath(rest[0]);
+        const dst = resolvePath(rest[1]);
+        if (!src || !src.node || src.node.type !== "file") return nope("cp: src is not a file");
+        if (!dst || !dst.parent || dst.parent.type !== "dir") return nope("cp: cannot create dest");
+        let dname = dst.name;
+        let dparent = dst.parent as any;
+        if (dst.node && dst.node.type === "dir") {
+          dparent = dst.node as any;
+          dname = src.name;
+        }
+        dparent.children[dname] = { type: "file", content: (src.node as any).content };
+        return ok(checkSimWin());
+      }
+      case "mv": {
+        if (!rest[0] || !rest[1]) return nope("mv: missing file operand");
+        const src = resolvePath(rest[0]);
+        const dst = resolvePath(rest[1]);
+        if (!src || !src.node) return nope("mv: src does not exist");
+        if (!dst || !dst.parent || dst.parent.type !== "dir") return nope("mv: cannot move to dest");
+        let dname = dst.name;
+        let dparent = dst.parent as any;
+        if (dst.node && dst.node.type === "dir") {
+          dparent = dst.node as any;
+          dname = src.name;
+        }
+        dparent.children[dname] = src.node;
+        delete (src.parent as any).children[src.name];
+        return ok(checkSimWin());
+      }
+      case "git": {
+        const sub = rest[0];
+        if (sub === "init") {
+          gitState.init = true;
+          return ok("Initialized empty Git repository." + checkSimWin());
+        }
+        if (!gitState.init) return nope("fatal: not a git repository");
+        if (sub === "status") {
+          return ok(`On branch main\nCommits: ${gitState.commits}\nStaged: ${gitState.staged}` + checkSimWin());
+        }
+        if (sub === "add") {
+          gitState.staged = true;
+          return ok(checkSimWin());
+        }
+        if (sub === "commit") {
+          if (!gitState.staged) return nope("nothing to commit");
+          gitState.staged = false;
+          gitState.commits++;
+          return ok(`[main (root-commit)] 1 file changed` + checkSimWin());
+        }
+        return nope(`git: '${sub}' is not a git command. See 'git --help'.`);
+      }
+      case "reset": {
+        resetSim();
+        return ok("simulation reset.");
+      }
+
       default:
         return nope(`"${verb}"? never heard of it. type  help`);
     }

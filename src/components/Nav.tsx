@@ -9,6 +9,7 @@ const links = [
   { href: "/achievements", label: "titles" },
   { href: "/leaderboard", label: "board" },
   { href: "/terminal", label: "toolkit" },
+  { href: "/arcade", label: "arcade" },
 ];
 
 export function Nav({
