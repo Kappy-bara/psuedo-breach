@@ -13,6 +13,7 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma db push --force-reset --skip-generate && tsx prisma/seed.ts",
+    "db:wipe": "tsx scripts/wipe-progress.ts",
     "db:studio": "prisma studio",
     "accounts": "tsx scripts/generate-accounts.ts",
     "selftest": "tsx scripts/selftest.ts",

@@ -11,16 +11,63 @@ function randomPassword(): string {
   return `${w()}-${w()}-${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
+async function logAdmin(actorId: string, action: string, targetId: string, meta: unknown = {}) {
+  await prisma.auditLog.create({
+    data: { action, actorId, targetType: "event", targetId, meta: JSON.stringify(meta) },
+  });
+}
+
 export async function setEventStatus(formData: FormData) {
   const admin = await requireAdmin();
   const eventId = String(formData.get("eventId"));
   const status = String(formData.get("status"));
   if (!["draft", "live", "ended"].includes(status)) return;
   await prisma.event.update({ where: { id: eventId }, data: { status } });
-  await prisma.auditLog.create({
-    data: { action: "event-status", actorId: admin.id, targetType: "event", targetId: eventId, meta: JSON.stringify({ status }) },
-  });
+  await logAdmin(admin.id, "event-status", eventId, { status });
   revalidatePath("/admin");
+  revalidatePath("/dashboard");
+}
+
+/** Go live right now: start = now, end = now + the event's current duration, status = live. */
+export async function startEventNow(formData: FormData) {
+  const admin = await requireAdmin();
+  const eventId = String(formData.get("eventId"));
+  const ev = await prisma.event.findUnique({ where: { id: eventId } });
+  if (!ev) return;
+  const spanMs = Math.max(3600_000, ev.endsAt.getTime() - ev.startsAt.getTime());
+  const startsAt = new Date();
+  const endsAt = new Date(startsAt.getTime() + spanMs);
+  await prisma.event.update({ where: { id: eventId }, data: { status: "live", startsAt, endsAt } });
+  await logAdmin(admin.id, "event-start-now", eventId, { startsAt, endsAt });
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+}
+
+/** Set start/end explicitly from datetime-local inputs (interpreted as UTC). */
+export async function setEventWindow(formData: FormData) {
+  const admin = await requireAdmin();
+  const eventId = String(formData.get("eventId"));
+  const startsAt = new Date(String(formData.get("startsAt")) + "Z");
+  const endsAt = new Date(String(formData.get("endsAt")) + "Z");
+  if (isNaN(+startsAt) || isNaN(+endsAt) || endsAt <= startsAt) return;
+  await prisma.event.update({ where: { id: eventId }, data: { startsAt, endsAt } });
+  await logAdmin(admin.id, "event-window", eventId, { startsAt, endsAt });
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+}
+
+/** Add minutes to the end time (the "give everyone 15 more minutes" button). */
+export async function extendEvent(formData: FormData) {
+  const admin = await requireAdmin();
+  const eventId = String(formData.get("eventId"));
+  const minutes = Math.max(-240, Math.min(240, Number(formData.get("minutes") ?? 0)));
+  const ev = await prisma.event.findUnique({ where: { id: eventId } });
+  if (!ev || !minutes) return;
+  const endsAt = new Date(ev.endsAt.getTime() + minutes * 60_000);
+  await prisma.event.update({ where: { id: eventId }, data: { endsAt } });
+  await logAdmin(admin.id, "event-extend", eventId, { minutes, endsAt });
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
 }
 
 export async function postAnnouncement(formData: FormData) {
@@ -43,12 +90,73 @@ export async function deleteAnnouncement(formData: FormData) {
   revalidatePath("/dashboard");
 }
 
+export async function clearAnnouncements(formData: FormData) {
+  const admin = await requireAdmin();
+  const eventId = String(formData.get("eventId"));
+  await prisma.announcement.deleteMany({ where: { eventId } });
+  await logAdmin(admin.id, "announce-clear", eventId);
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+}
+
 export async function setModuleHidden(formData: FormData) {
   await requireAdmin();
   const id = String(formData.get("moduleId"));
   const hidden = String(formData.get("hidden")) === "true";
   await prisma.module.update({ where: { id }, data: { isHidden: hidden } });
   revalidatePath("/admin");
+  revalidatePath("/dashboard");
+}
+
+export async function setPuzzleHidden(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("puzzleId"));
+  const hidden = String(formData.get("hidden")) === "true";
+  await prisma.puzzle.update({ where: { id }, data: { isHidden: hidden } });
+  revalidatePath("/admin");
+}
+
+/** Drop an item (or creds) into every participant's satchel in one event. */
+export async function grantItemToEvent(formData: FormData) {
+  const admin = await requireAdmin();
+  const eventId = String(formData.get("eventId"));
+  const itemKey = String(formData.get("itemKey") ?? "").trim();
+  const qty = Math.max(1, Math.min(9999, Number(formData.get("qty") ?? 1)));
+  if (!itemKey) return;
+  const users = await prisma.user.findMany({
+    where: { eventId, role: "participant" },
+    select: { id: true },
+  });
+  for (const u of users) {
+    await prisma.inventoryEntry.upsert({
+      where: { userId_itemKey: { userId: u.id, itemKey } },
+      update: { quantity: { increment: qty } },
+      create: { userId: u.id, itemKey, quantity: qty },
+    });
+  }
+  await logAdmin(admin.id, "grant-item-all", eventId, { itemKey, qty, users: users.length });
+  revalidatePath("/admin");
+}
+
+/** DANGER: wipe every player's progress in one event. Requires typing the event slug. */
+export async function wipeEventProgress(formData: FormData) {
+  const admin = await requireAdmin();
+  const eventId = String(formData.get("eventId"));
+  const confirm = String(formData.get("confirm") ?? "");
+  const ev = await prisma.event.findUnique({ where: { id: eventId } });
+  if (!ev || confirm !== ev.slug) return;
+  const userIds = (
+    await prisma.user.findMany({ where: { eventId }, select: { id: true } })
+  ).map((u) => u.id);
+  const w = { userId: { in: userIds } };
+  await prisma.submission.deleteMany({ where: w });
+  await prisma.solve.deleteMany({ where: w });
+  await prisma.inventoryEntry.deleteMany({ where: w });
+  await prisma.hintUnlock.deleteMany({ where: w });
+  await prisma.tradeExecution.deleteMany({ where: w });
+  await logAdmin(admin.id, "wipe-event-progress", eventId, { users: userIds.length });
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
 }
 
 export async function grantItemToUser(formData: FormData) {

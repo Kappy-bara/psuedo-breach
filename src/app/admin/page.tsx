@@ -1,11 +1,6 @@
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/session";
-import {
-  setEventStatus,
-  postAnnouncement,
-  deleteAnnouncement,
-  setModuleHidden,
-} from "@/lib/admin";
+import { EventPanel } from "@/components/admin/EventPanel";
 
 export default async function AdminHome() {
   await requireAdmin();
@@ -13,17 +8,23 @@ export default async function AdminHome() {
   const events = await prisma.event.findMany({
     orderBy: { isDemo: "desc" },
     include: {
-      _count: { select: { users: true, modules: true } },
+      _count: { select: { users: true } },
       announcements: { orderBy: { createdAt: "desc" }, take: 10 },
-      modules: { orderBy: { order: "asc" }, include: { _count: { select: { puzzles: true } } } },
+      modules: {
+        orderBy: { order: "asc" },
+        include: { puzzles: { orderBy: { order: "asc" } } },
+      },
     },
   });
 
-  const [recentSolves, anomalies, recentTrades] = await Promise.all([
+  const [recentSolves, anomalies, recentTrades, adminLog] = await Promise.all([
     prisma.solve.findMany({
       orderBy: { solvedAt: "desc" },
       take: 15,
-      include: { user: { select: { displayName: true } }, puzzle: { select: { title: true, slug: true } } },
+      include: {
+        user: { select: { displayName: true } },
+        puzzle: { select: { title: true } },
+      },
     }),
     prisma.auditLog.findMany({
       where: { action: "flag-owner-mismatch" },
@@ -34,6 +35,23 @@ export default async function AdminHome() {
       where: { action: "trade" },
       orderBy: { createdAt: "desc" },
       take: 15,
+    }),
+    prisma.auditLog.findMany({
+      where: {
+        action: {
+          in: [
+            "event-status",
+            "event-start-now",
+            "event-window",
+            "event-extend",
+            "grant-item-all",
+            "wipe-event-progress",
+            "announce-clear",
+          ],
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 12,
     }),
   ]);
   const traderNames = new Map(
@@ -50,94 +68,12 @@ export default async function AdminHome() {
       <h1 className="text-2xl font-bold">Event Control</h1>
 
       {events.map((ev) => (
-        <section key={ev.id} className="border border-border bg-panel/60 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="font-bold">
-                {ev.name}{" "}
-                <span className="text-xs text-ink-dim">
-                  {ev.isDemo ? "(demo)" : "(main)"}
-                </span>
-              </h2>
-              <p className="text-xs text-ink-dim">
-                {ev._count.users} users · {ev._count.modules} modules ·{" "}
-                {new Date(ev.startsAt).toUTCString()} → {new Date(ev.endsAt).toUTCString()}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-ink-dim">status: {ev.status}</span>
-              {(["draft", "live", "ended"] as const).map((s) => (
-                <form action={setEventStatus} key={s}>
-                  <input type="hidden" name="eventId" value={ev.id} />
-                  <input type="hidden" name="status" value={s} />
-                  <button
-                    disabled={ev.status === s}
-                    className={`border px-2 py-0.5 text-xs transition-colors ${
-                      ev.status === s
-                        ? "border-accent text-accent"
-                        : "border-border text-ink-dim hover:border-ink-dim"
-                    }`}
-                  >
-                    {s}
-                  </button>
-                </form>
-              ))}
-            </div>
-          </div>
-
-          {/* announcements */}
-          <div className="mt-4">
-            <form action={postAnnouncement} className="flex gap-2">
-              <input type="hidden" name="eventId" value={ev.id} />
-              <input
-                name="bodyMd"
-                placeholder="broadcast an announcement (markdown ok)…"
-                className="flex-1 border border-border bg-panel-2 px-3 py-1.5 text-sm outline-none focus:border-accent"
-              />
-              <button className="border border-accent/50 px-3 text-sm text-accent hover:bg-accent hover:text-bg transition-colors">
-                post
-              </button>
-            </form>
-            <ul className="mt-2 space-y-1">
-              {ev.announcements.map((a) => (
-                <li key={a.id} className="flex items-center justify-between text-xs text-ink-dim">
-                  <span>
-                    {new Date(a.createdAt).toLocaleTimeString()} — {a.bodyMd}
-                  </span>
-                  <form action={deleteAnnouncement}>
-                    <input type="hidden" name="id" value={a.id} />
-                    <button className="text-accent-red/70 hover:text-accent-red">delete</button>
-                  </form>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* module visibility */}
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            {ev.modules.map((m) => (
-              <form action={setModuleHidden} key={m.id}>
-                <input type="hidden" name="moduleId" value={m.id} />
-                <input type="hidden" name="hidden" value={String(!m.isHidden)} />
-                <button
-                  className={`border px-2 py-0.5 text-xs transition-colors ${
-                    m.isHidden
-                      ? "border-border text-ink-dim line-through"
-                      : "border-accent/40 text-accent"
-                  }`}
-                  title={m.isHidden ? "hidden — click to show" : "visible — click to hide"}
-                >
-                  {m.slug} ({m._count.puzzles})
-                </button>
-              </form>
-            ))}
-          </div>
-        </section>
+        <EventPanel key={ev.id} ev={ev} />
       ))}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <section className="border border-border bg-panel/60 p-5">
-          <h2 className="text-xs tracking-widest text-ink-dim">// RECENT SOLVES</h2>
+        <section className="panel p-5">
+          <h2 className="kicker">// recent solves</h2>
           <ul className="mt-3 space-y-1 text-sm">
             {recentSolves.map((s) => (
               <li key={s.id} className="flex justify-between text-ink-dim">
@@ -150,20 +86,20 @@ export default async function AdminHome() {
                 </span>
               </li>
             ))}
-            {recentSolves.length === 0 && <li className="text-ink-dim">no solves yet</li>}
+            {recentSolves.length === 0 && <li className="text-ink-dim">nothing yet</li>}
           </ul>
         </section>
 
         <section className="border border-accent-red/30 bg-accent-red/[0.05] p-5">
-          <h2 className="text-xs tracking-widest text-accent-red">// FLAG-SHARING FLAGS</h2>
+          <h2 className="kicker text-accent-red">// flag-sharing</h2>
           <ul className="mt-3 space-y-1 text-sm text-ink-dim">
             {anomalies.map((a) => {
               const meta = JSON.parse(a.meta || "{}");
               return (
                 <li key={a.id}>
-                  {new Date(a.createdAt).toLocaleTimeString()} — user{" "}
-                  <span className="text-ink">{meta.submittedBy}</span> submitted a flag minted
-                  for <span className="text-ink">{meta.mintedFor}</span> ({meta.puzzle})
+                  {new Date(a.createdAt).toLocaleTimeString()} —{" "}
+                  <span className="text-ink">{meta.submittedBy}</span> used{" "}
+                  <span className="text-ink">{meta.mintedFor}</span>&apos;s flag ({meta.puzzle})
                 </li>
               );
             })}
@@ -171,8 +107,8 @@ export default async function AdminHome() {
           </ul>
         </section>
 
-        <section className="border border-border bg-panel/60 p-5">
-          <h2 className="text-xs tracking-widest text-ink-dim">// RECENT TRADES (SUDO)</h2>
+        <section className="panel p-5">
+          <h2 className="kicker">// recent trades (SUDO)</h2>
           <ul className="mt-3 space-y-1 text-sm text-ink-dim">
             {recentTrades.map((t) => {
               const meta = JSON.parse(t.meta || "{}");
@@ -186,6 +122,20 @@ export default async function AdminHome() {
               );
             })}
             {recentTrades.length === 0 && <li>no trades yet</li>}
+          </ul>
+        </section>
+
+        <section className="panel p-5">
+          <h2 className="kicker">// admin actions</h2>
+          <ul className="mt-3 space-y-1 text-sm text-ink-dim">
+            {adminLog.map((a) => (
+              <li key={a.id}>
+                {new Date(a.createdAt).toLocaleTimeString()} —{" "}
+                <span className="text-ink">{a.action}</span>{" "}
+                <span className="text-ink-faint">{a.meta !== "{}" && a.meta}</span>
+              </li>
+            ))}
+            {adminLog.length === 0 && <li>none</li>}
           </ul>
         </section>
       </div>
