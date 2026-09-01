@@ -55,7 +55,7 @@ export function ActivityFeed({
           <>
             <span className="mr-1">{kindIcon[r.kind] ?? "·"}</span>
             {r.title}
-            <span className="ml-1 text-ink-faint">· {ago(r.at)}</span>
+            <span className="ml-1 text-ink-faint" suppressHydrationWarning>· {ago(r.at)}</span>
           </>
         ) : (
           "no activity yet — be the first"
@@ -80,7 +80,7 @@ export function ActivityFeed({
           >
             <span className="w-4 shrink-0 text-center">{kindIcon[r.kind] ?? "·"}</span>
             <span className={r.kind === "first-blood" ? "font-semibold" : ""}>{r.title}</span>
-            <span className="ml-auto shrink-0 text-xs text-ink-faint">{ago(r.at)}</span>
+            <span className="ml-auto shrink-0 text-xs text-ink-faint" suppressHydrationWarning>{ago(r.at)}</span>
           </li>
         );
       })}

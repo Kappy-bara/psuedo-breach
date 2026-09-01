@@ -1,6 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { MemoryMatch } from "@/components/arcade/MemoryMatch";
+import { SnakeGame } from "@/components/arcade/SnakeGame";
+import { SimonSays } from "@/components/arcade/SimonSays";
+import { TicTacToe } from "@/components/arcade/TicTacToe";
+import { Minesweeper } from "@/components/arcade/Minesweeper";
 
 // --- RPS GAME ---
 function RPSGame() {
@@ -257,6 +262,12 @@ function ArcadeSubmitter() {
     else if (val === "CMINUS{G4M3R_M0D3_4CT1V4T3D}") slug = "mini-game";
     else if (val === "CMINUS{JUMP_4R0UND}") slug = "jumper";
     else if (val === "CMINUS{SUD0KU_M4ST3R}") slug = "sudoku";
+    else if (val === "CMINUS{M3M0RY_M4TCH}") slug = "memory-match";
+    else if (val === "CMINUS{SN4K3_CH4RM3R}") slug = "snake-game";
+    else if (val === "CMINUS{S1M0N_H4CK3D}") slug = "simon-says";
+    else if (val === "CMINUS{T1C_T4C_W1N}") slug = "tic-tac-toe";
+    else if (val === "CMINUS{M1N3_SW33P3R}") slug = "minesweeper";
+    else if (val === "CMINUS{READ_THE_MANUAL}") slug = "arcade-code";
     else {
       setMsg("Invalid arcade code.");
       return;
@@ -318,9 +329,16 @@ export default function ArcadePage() {
         </p>
         <ArcadeSubmitter />
       </div>
-      <RPSGame />
-      <JumperGame />
-      <SudokuGame />
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <RPSGame />
+        <JumperGame />
+        <SudokuGame />
+        <MemoryMatch />
+        <SnakeGame />
+        <SimonSays />
+        <TicTacToe />
+        <Minesweeper />
+      </div>
     </div>
   );
 }
