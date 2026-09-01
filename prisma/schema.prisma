@@ -1,18 +1,20 @@
 // PSEUDO-BREACH — data model (v2: the hacking dungeon)
 //
-// Local dev uses SQLite (zero setup). Production on Vercel uses Postgres (Neon).
-// To switch to Postgres: change `provider` below to "postgresql" and set DATABASE_URL
-// to your Neon pooled connection string. The schema is written to be portable:
-// no enums, no scalar lists, no native Json — JSON payloads are stored as String
-// and parsed in app code (see src/lib/json.ts).
+// Postgres (Neon). DATABASE_URL is the *pooled* connection (used at runtime);
+// DIRECT_URL is the *direct* (non-pooled) connection, used by `prisma db push`
+// and migrations — Neon's pooler can't run schema changes. For local SQLite,
+// set both to "file:./dev.db" and flip provider back to "sqlite". The schema is
+// written to be portable: no enums, no scalar lists, no native Json — JSON
+// payloads are stored as String and parsed in app code (see src/lib/json.ts).
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
