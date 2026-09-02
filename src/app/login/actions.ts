@@ -25,8 +25,8 @@ export async function authenticate(
       redirectTo: "/dashboard",
     });
     return { error: null };
-  } catch (e) {
-    if (e instanceof AuthError) {
+  } catch (e: any) {
+    if (e instanceof AuthError || e?.type === "CredentialsSignin" || e?.name === "CredentialsSignin") {
       return { error: "Wrong register ID or password." };
     }
     throw e; // NEXT_REDIRECT and everything else must propagate

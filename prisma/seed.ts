@@ -436,6 +436,7 @@ const mainEvent: EventSeed = {
     { key: "trophy-sweettooth", name: "Sweet Tooth", type: "trophy", icon: "🍯", descriptionMd: "You walked into the honeypot and walked back out." },
     { key: "trophy-onair", name: "On Air", type: "trophy", icon: "📻", descriptionMd: "You made the broadcast window." },
     { key: "trophy-root", name: "root", type: "trophy", icon: "👑", descriptionMd: "You own THE STACK." },
+    { key: "doc-pass", name: "Operator's Pass", type: "keycard", icon: "📖", descriptionMd: "Grants access to the Operator's Manual." },
   ],
   achievements: [
     { key: "first-steps", name: "First Steps", icon: "👣", descriptionMd: "Clear your first room.", credReward: 15, rule: { kind: "map-runner", n: 1 } },
@@ -501,9 +502,61 @@ const mainEvent: EventSeed = {
         repeatable: true,
         showIfHolds: { "loot-coffee": 1 },
       },
+      {
+        label: "Buy the Operator's Pass — 10 💰",
+        descriptionMd: "Can't figure out the game? The manual costs 10 creds. Access granted at G0.",
+        give: { cred: 10 },
+        get: { "doc-pass": 1 },
+        showIfHolds: {},
+      },
     ],
   },
   modules: [
+    {
+      slug: "docs-guide",
+      title: "G0 · THE GUIDE",
+      theme: "cyan",
+      blurb: "The Operator's Manual. Learn how to play.",
+      map: { x: -2, y: -2, zone: "tutorial" },
+      prereq: { "doc-pass": 1 },
+      clearReward: { cred: 5 },
+      puzzles: [
+        {
+          slug: "guide-read",
+          title: "Acknowledge",
+          basePoints: 10,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{RTFM}" },
+          rewards: { cred: 10 },
+          promptMd: `
+# Welcome to THE STACK
+
+This is an open-world puzzle dungeon. Your goal is to crack rooms, earn points, and climb the leaderboard.
+
+### 💰 Economy
+- **Points**: Earned by solving puzzles. These determine your rank.
+- **Creds**: In-game currency. You earn creds from solving puzzles, being the first to solve a room (First Blood 🩸), and unlocking achievements.
+- **Shop**: Spend your creds at **The Shop** (accessible from the Dashboard) to buy tips, forge keycards, or sell junk.
+
+### 🔑 Keycards & Shards
+Some rooms are locked. You'll need specific keycards to enter.
+- **Shards (Alpha/Beta)**: Collect 3 shards of the same type to forge a keycard at the Shop.
+- **Keycards**: Red, Blue, Green, Black, and Master. Check the Map to see which keycard opens which room.
+
+### ⏰ Timed Rooms
+Keep an eye on the map! Some rooms only open during specific time windows (e.g., "Opens for 5 minutes every 20 minutes").
+
+### 🏆 Achievements & Titles
+Visit the **Achievements** tab. Complete specific challenges to earn creds and Titles. Your highest priority Title will be displayed next to your name on the Leaderboard.
+
+***
+
+**Question**: To prove you've read the manual, what does "RTFM" stand for? (Just kidding, the flag is \`CMINUS{RTFM}\`).
+          `,
+        }
+      ],
+      hints: [],
+    },
     {
       slug: "linux-basics",
       title: "T0 · LINUX 101",
@@ -921,7 +974,61 @@ Q01JTlVTezVVUFBMWV81TjRUQ0gzRH0=
           validatorConfig: { answer: "CMINUS{SUD0KU_M4ST3R}" },
           rewards: { cred: 30 },
           promptMd: "Go to the **Arcade** tab. Solve the Sudoku puzzle to get the flag!",
-        }
+        },
+        {
+          slug: "memory-match",
+          title: "Option 5: Memory Match",
+          basePoints: 100,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{M3M0RY_M4TCH}" },
+          rewards: { cred: 20 },
+          promptMd: "Go to the **Arcade** tab. Match all the hardware components in the Memory Match game!",
+        },
+        {
+          slug: "snake-game",
+          title: "Option 6: Terminal Snake",
+          basePoints: 150,
+          difficulty: "medium",
+          validatorConfig: { answer: "CMINUS{SN4K3_CH4RM3R}" },
+          rewards: { cred: 30 },
+          promptMd: "Go to the **Arcade** tab. Play Terminal Snake and reach a score of 15 to get the flag!",
+        },
+        {
+          slug: "simon-says",
+          title: "Option 7: Simon Says",
+          basePoints: 125,
+          difficulty: "medium",
+          validatorConfig: { answer: "CMINUS{S1M0N_H4CK3D}" },
+          rewards: { cred: 25 },
+          promptMd: "Go to the **Arcade** tab. Memorize and repeat a sequence of 6 flashes in Simon Says to get the flag!",
+        },
+        {
+          slug: "tic-tac-toe",
+          title: "Option 8: Tic-Tac-Toe",
+          basePoints: 75,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{T1C_T4C_W1N}" },
+          rewards: { cred: 15 },
+          promptMd: "Go to the **Arcade** tab. Beat the AI at Tic-Tac-Toe to get the flag!",
+        },
+        {
+          slug: "minesweeper",
+          title: "Option 9: Minesweeper",
+          basePoints: 200,
+          difficulty: "hard",
+          validatorConfig: { answer: "CMINUS{M1N3_SW33P3R}" },
+          rewards: { cred: 35 },
+          promptMd: "Go to the **Arcade** tab. Clear the 8x8 minefield without detonating any viruses!",
+        },
+        {
+          slug: "arcade-code",
+          title: "Option 10: Secret Code",
+          basePoints: 0,
+          difficulty: "easy",
+          validatorConfig: { answer: "CMINUS{READ_THE_MANUAL}" },
+          rewards: { "doc-pass": 1 },
+          promptMd: "Enter the secret Operator's Code to receive a free Operator's Pass.",
+        },
       ],
       hints: [
         { contentMd: "For Option 1, look up the 'Konami Code'. For the others, visit `/arcade`.", rule: { kind: "free" } },

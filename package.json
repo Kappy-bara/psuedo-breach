@@ -16,6 +16,7 @@
     "db:wipe": "tsx scripts/wipe-progress.ts",
     "db:studio": "prisma studio",
     "accounts": "tsx scripts/generate-accounts.ts",
+    "update-users": "tsx scripts/update-users.ts",
     "selftest": "tsx scripts/selftest.ts",
     "postinstall": "prisma generate"
   },

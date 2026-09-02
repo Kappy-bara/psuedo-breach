@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/session";
 import { setUserLocked, grantItemToUser } from "@/lib/admin";
 import { getLeaderboard } from "@/lib/game";
 import { ResetPasswordButton } from "./ResetPasswordButton";
+import { WipeUserButton } from "./WipeUserButton";
 
 export default async function AdminUsers({ searchParams }: PageProps<"/">) {
   await requireAdmin();
@@ -113,6 +114,7 @@ export default async function AdminUsers({ searchParams }: PageProps<"/">) {
                         grant
                       </button>
                     </form>
+                    <WipeUserButton userId={u.id} />
                   </div>
                 </td>
               </tr>

@@ -1,0 +1,5 @@
+registerId,name,branch,year,role
+PB-1234-01,Alice Wong,Computer Science,2,participant
+PB-5678-02,Bob Smith,Electronics,3,admin
+PB-9999-03,Charlie Davis,,,participant
+PB-0000-04,Diana Price,Mechanical,,
